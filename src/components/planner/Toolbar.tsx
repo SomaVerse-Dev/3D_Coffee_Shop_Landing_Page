@@ -1,6 +1,6 @@
 'use client'
 
-import { Box, Calculator, DoorOpen, FileDown, LayoutTemplate, Link2, Map, Redo2, Ruler, SwatchBook, TriangleAlert, Undo2 } from 'lucide-react'
+import { Box, Calculator, CircleHelp, DoorOpen, FileDown, Keyboard, LayoutTemplate, Link2, Map, Redo2, Ruler, SwatchBook, TriangleAlert, Undo2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -18,6 +18,9 @@ import { BRAND_PRESETS, computedBrandName } from '@/lib/planner/brandNames'
 import { buildShareUrl } from '@/lib/planner/share'
 import { cn } from '@/lib/utils'
 import LayoutsMenu from './LayoutsMenu'
+import SessionHistory from './SessionHistory'
+import { SHORTCUTS_EVENT } from './ShortcutsDialog'
+import { startTour } from './CoachTour'
 
 function compactMoney(n: number): string {
   if (n >= 1000) return `$${(Math.round(n / 100) / 10).toFixed(1)}k`
@@ -141,6 +144,7 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
           className="flex gap-0.5 rounded-[10px] border border-stone-300/80 bg-white p-0.5 shadow-xs"
           role="group"
           aria-label="View mode"
+          data-tour="view-toggle"
         >
           {([['plan', Map, 'Plan'], ['3d', Box, '3D']] as const).map(([mode, Icon, label]) => (
             <Tooltip key={mode}>
@@ -167,7 +171,10 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
         </div>
 
         {/* fire safety */}
-        <label className="flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-stone-300/80 bg-white px-3 shadow-xs transition-colors hover:border-stone-400/70">
+        <label
+          className="flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-stone-300/80 bg-white px-3 shadow-xs transition-colors hover:border-stone-400/70"
+          data-tour="fire"
+        >
           <DoorOpen className={cn('h-4 w-4 transition-colors', showFire ? 'text-emerald-600' : 'text-stone-400')} />
           <span className="hidden text-xs font-medium text-stone-600 2xl:inline">Fire safety</span>
           <Switch checked={showFire} onCheckedChange={toggleFire} aria-label="Show fire safety egress" />
@@ -180,6 +187,7 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
               variant="outline"
               className="h-9 bg-white text-xs font-medium shadow-xs transition-colors hover:border-stone-400/70 hover:bg-white"
               title="Brand color"
+              data-tour="brand"
             >
               <SwatchBook className="mr-1.5 h-3.5 w-3.5 text-stone-400" />
               <span className="hidden 2xl:inline">{computedBrandName(brandColor)}</span>
@@ -263,6 +271,9 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
         {/* saved layouts */}
         <LayoutsMenu />
 
+        {/* session checkpoints */}
+        <SessionHistory />
+
         {/* share link */}
         <Tooltip>
           <TooltipTrigger asChild>
@@ -283,11 +294,49 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
         <Separator orientation="vertical" className="hidden h-8 sm:block" />
 
         <div className="ml-auto flex items-center gap-2">
+          {/* help menu: tour + shortcuts */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label="Help and tour"
+                title="Help & tour"
+                className="h-9 w-9 bg-white shadow-xs"
+              >
+                <CircleHelp className="h-4 w-4 text-stone-400" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-56 p-1.5">
+              <button
+                onClick={() => startTour()}
+                className="flex w-full items-start gap-2.5 rounded-lg p-2 text-left transition-colors hover:bg-stone-100/80"
+              >
+                <Box className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400" />
+                <span>
+                  <span className="block text-xs font-semibold text-charcoal">Take the studio tour</span>
+                  <span className="mt-0.5 block text-[10.5px] leading-snug text-stone-400">7 quick stops around the workspace.</span>
+                </span>
+              </button>
+              <button
+                onClick={() => window.dispatchEvent(new Event(SHORTCUTS_EVENT))}
+                className="flex w-full items-start gap-2.5 rounded-lg p-2 text-left transition-colors hover:bg-stone-100/80"
+              >
+                <Keyboard className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400" />
+                <span>
+                  <span className="block text-xs font-semibold text-charcoal">Keyboard shortcuts</span>
+                  <span className="mt-0.5 block text-[10.5px] leading-snug text-stone-400">Press ? anytime for the cheat sheet.</span>
+                </span>
+              </button>
+            </PopoverContent>
+          </Popover>
+
           <Button
             variant="outline"
             onClick={() => setCostOpen(true)}
             aria-label={budgetState?.status === 'over' ? `Open cost estimate — ${compactMoney(cost.total)}, over budget` : 'Open cost estimate'}
             title={budgetState ? `Budget: ${budgetState.status === 'over' ? 'over' : 'under'} — open the estimate` : 'Open cost estimate'}
+            data-tour="cost"
             className={cn(
               'h-9 gap-1.5 rounded-full border bg-white pl-3 pr-3.5 text-xs font-medium shadow-xs transition-colors hover:bg-white',
               budgetState?.status === 'over'
@@ -317,6 +366,7 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
           </Button>
           <Button
             onClick={onExport}
+            data-tour="export"
             className="h-9 bg-charcoal px-3.5 text-xs font-semibold text-warmwhite shadow-xs transition-all hover:bg-charcoal/90 hover:shadow-md active:scale-[0.98]"
           >
             <FileDown className="mr-1.5 h-3.5 w-3.5" />

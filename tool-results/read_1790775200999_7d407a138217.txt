@@ -1,0 +1,203 @@
+     1→     1→# FORMA — 3D Commercial Space Planner · Worklog
+     2→     2→
+     3→     3→Project: Next.js 16 + TypeScript + Tailwind 4 + shadcn/ui + react-three-fiber (three@0.186, @react-three/fiber@9, @react-three/drei@10, maath, jspdf@4).
+     4→     4→Product: "FORMA" — 3D planner for cafés / co-working / boutique retail with plan↔3D camera swing, brand-color theming, capacity + fire-egress meter, live cost estimator, PDF export with build-up animation.
+     5→     5→
+     6→     6→---
+     7→     7→Task ID: 1
+     8→     8→Agent: Z.ai Code (main)
+     9→     9→Task: Project setup + dependency install
+    10→    10→
+    11→    11→Work Log:
+    12→    12→- Inspected scaffold (Next.js 16, Tailwind 4, shadcn/ui full set, zustand, framer-motion present).
+    13→    13→- Installed: three@0.186, @react-three/fiber@9, @react-three/drei@10, maath, jspdf@4, @types/three.
+    14→    14→- Image-search skill was down (upstream 400/429); pivoted to image-generation skill → 4 documentary-style interiors in public/gallery/{cafe,coworking,boutique,restaurant}.png.
+    15→    15→
+    16→    16→Stage Summary:
+    17→    17→- Deps + assets ready.
+    18→    18→
+    19→    19→---
+    20→    20→Task ID: 2
+    21→    21→Agent: Z.ai Code (main)
+    22→    22→Task: Full application build (data layer, 3D scene, workspace UI, sections, export)
+    23→    23→
+    24→    24→Work Log:
+    25→    25→- Data layer:
+    26→    26→  - src/lib/planner/types.ts (CatalogItem, PlacedItem, TemplateDef…)
+    27→    27→  - catalog.ts — 31 furniture items (footprints, prices, seats, brandable flags, plan shapes)
+    28→    28→  - templates.ts — 4 hand-tuned layouts: Corner Café 10×8, Studio Works 12×9, Atelier Retail 9×7, Bistro Verde 11×9
+    29→    29→  - store.ts — zustand + persist (skipHydration + manual rehydrate after mount to avoid SSR mismatch), snap 0.05 m, room clamping
+    30→    30→  - capacity.ts — IBC-style occupant factors (cafe/restaurant 1.4, coworking 9.3, retail 0.6 m²/p), EXIT_CAPACITY=420 (1.2m+0.9m doors), density statuses, cost engine (12% install, 8% contingency)
+    31→    31→- 3D scene (src/components/planner/Scene.tsx):
+    32→    32→  - CameraRig: damped swing between top-down plan (north-up via camera.up=(0,0,-1)) and 3D perspective; OrbitControls disabled mid-swing
+    33→    33→  - Room: floor slab + drei Grid + walls with real door gaps (1.4 m south entrance, 0.95 m north rear exit) + west-wall windows
+    34→    34→  - furniture.tsx: 31 procedural models from primitives (café counter w/ espresso machine, booth, desk cluster ×4 w/ chairs, phone booth, clothing rail, mannequin, pendants…)
+    35→    35→  - Drag & drop via ground-plane raycast, snap + clamp; ghost preview when armed; selection ring + footprint tint; damped rotation
+    36→    36→  - EgressPaths: 3 CatmullRom curves, flowing cone chevrons animated in useFrame; green exit frames + emissive signs
+    37→    37→- Workspace UI:
+    38→    38→  - Toolbar: template Select, room-size popover sliders, Plan/3D segmented toggle, Fire safety switch, brand picker (8 presets + custom color + hex), live cost badge, Export PDF
+    39→    39→  - CatalogSidebar: search + category chips + 31 item cards (price, footprint, seats, brand dot); mobile variant in left Sheet
+    40→    40→  - HUD: HintChip, CapacityMeter (animated seat counter, density bar, occupant load vs egress 420), SelectionControls (rotate/duplicate/delete), PlanMinimap (live PlanSVG, collapsible)
+    41→    41→  - CostPanel: right Sheet with grouped lines, subtotal/install/contingency/total
+    42→    42→  - ExportModal: staged build-up animation (grid → walls clip-reveal → furniture → egress → title-block stamp) + real PDF via hidden PlanSVG → canvas → jsPDF A4
+    43→    43→- Sections: TemplateGallery (photo cards + live stats + Load), CapacityGuide (rules table + feature cards), BrandStrip (8 swatches, live apply), sticky charcoal footer, sticky top nav
+    44→    44→- Theme: warm-white/oat/charcoal tokens in globals.css, blueprint-grid + thin-scroll utilities, Space Grotesk (display) + Inter (body)
+    45→    45→- Fixes during browser QA (agent-browser):
+    46→    46→  - duplicate `computedBrandName` import; maath import → `import { damp, damp3 } from 'maath/easing'`
+    47→    47→  - react-hooks lint: animating ref renamed animatingRef; mounted via useSyncExternalStore
+    48→    48→  - plan-view 45° roll fixed via camera.up=(0,0,-1) in plan mode
+    49→    49→  - export sheet furniture hidden by overlay layer's white rect → transparentPaper now skips paper/room-fill/grid
+    50→    50→  - placement deselected item (arm(null) wiped selectedUid) → arm keeps selection when disarming
+    51→    51→  - zustand persist hydration mismatch → skipHydration:true + rehydrate() in effect
+    52→    52→  - Math.random() in skeleton → deterministic delays
+    53→    53→- Verified via agent-browser: place chair (15→16 seats), plan/3D swing, fire toggle (chevrons + EXIT + minimap paths), brand recolor live, cost panel math ($20,604), PDF download toast "Layout sheet exported", template switch, drag cluster (-3.4,-2.3)→(-0.95,0.1) grid-snapped, keyboard R/Delete, mobile 390px layout + Add items sheet, gallery/footer render.
+    54→    54→
+    55→    55→Stage Summary:
+    56→    56→- App fully functional at / (only route). Lint clean, dev.log clean (only benign THREE deprecation warnings).
+    57→    57→- Remaining known nits: fire exit frame could be prettier; chevron size tuned; gallery images are AI-generated (search service was down).
+    58→    58→
+    59→    59→---
+    60→    60→Task ID: 3-a
+    61→    61→Agent: frontend-styling-expert (subagent)
+    62→    62→Task: Visual polish pass — see instructions in its section below (PENDING at time of writing)
+    63→    63→
+    64→    64→---
+    65→    65→Task ID: 3-a
+    66→    66→Agent: frontend-styling-expert
+    67→    67→Task: Visual polish pass
+    68→    68→
+    69→    69→Work Log:
+    70→    70→- globals.css: added `.card-glass` / `.chip-glass` (shared HUD glass: warm-white translucency + backdrop-blur + inset highlight + soft charcoal shadow), `.blueprint-band` (faded masked blueprint grid for the hero), `.pb-safe` (safe-area-inset footer padding), warm oat `::selection`, smooth anchor scrolling guarded by `prefers-reduced-motion`, and a base `button/a/[role=button]:focus-visible` double-ring (warm-white + charcoal) for every hand-rolled control. `blueprint-grid` and `thin-scroll` kept intact. No blue/indigo introduced anywhere.
+    71→    71→- Toolbar.tsx: refined rhythm (px-3/py-2.5, sm:gap-2.5, inset hairline under the bar), brand swatch now a shaded+ringed tile, template Select trigger gained a LayoutTemplate icon and 186px width, room-size dims use tabular-nums, Plan/3D became an inset segmented control (p-0.5 track, rounded-lg thumbs, charcoal active w/ shadow-sm), fire-safety & brand buttons got hover border + shadow-xs, brand preset swatches got aria-pressed + shadow, cost control restyled as a rounded-full pill badge with font-display bold tabular-nums amount, Export PDF got shadow + active:scale press.
+    72→    72→- CatalogSidebar.tsx: header now shows a "31 pieces" count chip, search clear button is a rounded hover target, category chips got aria-pressed/shadow/hover states, item cards got hover lift (-translate-y-px + directional shadow), armed/active card got a deep charcoal shadow plus a pulsing "placing" ping dot, prices/dims use tabular-nums, name tracking tightened, empty state turned into a dashed card. Switched the card grid from 2 columns to 1 (292px sidebar was truncating names — caught in QA).
+    73→    73→- ViewportHud.tsx / CapacityMeter.tsx: all four floating panels (hint chip, selection controls, minimap, capacity meter) moved onto the shared `.card-glass`/`.chip-glass` treatment; big seat counter + all numeric readouts now font-display/tabular-nums; status pill gained shadow-xs + backdrop-blur; minimap header is a labeled hoverable toggle with aria-label + aria-expanded, plan frame got shadow-xs, footer meta got a green "live" dot; rotate/duplicate/delete buttons got explicit aria-labels; capacity bar track got an inset shadow.
+    74→    74→- page.tsx: header nav converted to padded hover chips; hero section now `relative` with a decorative `.blueprint-band` strip (aria-hidden, -z-10) behind the copy, eyebrow chip + kbd styling got shadow-xs, h1/subcopy got text-balance/text-pretty, stat trio rebuilt as a semantic dl with 2xl tabular-nums figures and icon labels; footer rebuilt: gradient hairline top highlight, 1.5fr/1fr/1.3fr column rhythm, small rules under column headings, footer links animate a dash + slide on hover, and a new bottom legal bar (border-t white/10) with © line and tagline, `.pb-safe` safe-area padding. Footer remains sticky-to-bottom via existing min-h-screen flex + mt-auto.
+    75→    75→- sections.tsx: template cards — added charcoal gradient overlay on photos (deepens on hover), price pill flipped to dark charcoal/90 + ring + tabular-nums showing cost · dims, stats row now seats/m²/installed-cost with tabular-nums, card hover deepens border + xl shadow, Load button got press feedback; capacity guide table got zebra rows (odd:bg-white/50) + row hover, header tracking unified; feature cards became staggered motion.divs (whileInView, 0.08s stagger, SSR-safe) with hover border/shadow; brand swatches got title tooltips, aria-pressed, ring-charcoal/10 definition and drop-shadow on the check; "what gets repainted" tiles got hover:bg-white; signature card got ring + inner-shaded swatch.
+    76→    76→- QA loop with agent-browser + VLM at 1440px and 390px: fixed sidebar 2-col truncation (→1 col) and strengthened price-pill contrast (bg-charcoal/90 + ring) from findings; programmatic overflow check = 0px horizontal overflow at 390px; Plan/3D toggle smoke-tested both directions; console clean apart from pre-existing benign THREE deprecation warnings.
+    77→    77→
+    78→    78→Stage Summary:
+    79→    79→- Pure className/style/copy-level polish; store.ts, Scene.tsx, furniture.tsx, capacity logic and all interaction behavior untouched; no new packages; still a single `/` route; footer still sticky-to-bottom with safe-area padding.
+    80→    80→- Files touched: src/app/globals.css, src/components/planner/Toolbar.tsx, CatalogSidebar.tsx, ViewportHud.tsx, CapacityMeter.tsx, src/components/planner/sections.tsx, src/app/page.tsx.
+    81→    81→- New reusable utilities: .card-glass, .chip-glass, .blueprint-band, .pb-safe + global focus-visible ring, oat ::selection, reduced-motion-guarded smooth scroll.
+    82→    82→- `bun run lint` passes with 0 errors; VLM screenshot QA (desktop + mobile + full page) reports no clipping/overflow; remaining nits: none blocking.
+    83→    83→
+    84→    84→---
+    85→    85→Task ID: 4
+    86→    86→Agent: Z.ai Code (main)
+    87→    87→Task: Post-polish verification + handoff to scheduled QA
+    88→    88→
+    89→    89→Work Log:
+    90→    90→- Re-verified after subagent polish pass: page loads at 1280px with refined toolbar (icon select trigger, cost pill badge, segmented view control), hero stat trio, gallery price pills.
+    91→    91→- `bun run lint` → 0 errors. dev.log → GET / 200, no runtime errors. Console clean (only benign THREE deprecation warnings).
+    92→    92→- Feature matrix confirmed working earlier in Task 2 QA: place/drag/rotate/delete, plan↔3D swing (north-up plan), fire egress chevrons + exit frames + minimap paths, brand recolor (8 presets + custom), capacity meter statuses (Comfortable/Getting tight), cost panel math, PDF export toast, template switching, mobile layout + catalog sheet.
+    93→    93→
+    94→    94→Stage Summary:
+    95→    95→- Project is feature-complete for v1 and visually polished. Handed off to 15-minute webDevReview cron for continuous QA/iteration.
+    96→    96→- Next-step ideas for future rounds: undo/redo, save named layouts to Prisma, multi-floor, item context menu, shareable layout URLs, dark mode.
+    97→    97→
+    98→    98→---
+    99→    99→Task ID: 5
+   100→   100→Agent: Z.ai Code (cron webDevReview)
+   101→   101→Task: Round 1 — QA sweep + Undo/Redo + Saved Layouts (Prisma/API) + Share links + toolbar fit polish
+   102→   102→
+   103→   103→Work Log:
+   104→   104→- Status assessment: v1 stable (lint 0 errors, GET / 200, console clean, agent-browser desktop+mobile sweep showed no bugs). Phase = stable → new-feature round per mandate.
+   105→   105→- Undo/Redo:
+   106→   106→  - store.ts: module-level history (past/future, limit 60) with same-action coalescing (900 ms) so drags/slider sweeps collapse into one undo step; undoDepth/redoDepth mirrored into store for reactive buttons; actions applySnapshot/getSnapshot/undo/redo added; every mutating action pushes history.
+   107→   107→  - Keyboard: Ctrl/Cmd+Z, Ctrl+Shift+Z, Ctrl+Y (guarded against inputs); Toolbar got a joined undo/redo icon pair with tooltips + disabled states.
+   108→   108→- Saved layouts (backend):
+   109→   109→  - prisma/schema.prisma: SavedLayout model (name, data JSON, thumb PNG data-URL, brandColor, timestamps) → bun run db:push OK.
+   110→   110→  - API (route handlers, zod-validated): GET/POST /api/layouts, GET/DELETE /api/layouts/[id]. List returns {id,name,brandColor,thumb,updatedAt,itemCount}.
+   111→   111→  - thumbnail.ts: canvas-drawn 2D plan preview (grid, rounded rect/circle glyphs in brand color, walls) → PNG data-URL for thumbnails.
+   112→   112→  - LayoutsMenu.tsx popover: inline save form (name defaults to project name, Enter submits), saved list with thumbnails + relative dates (date-fns), row click loads, two-step delete confirm (2.6 s window), loading skeletons, dashed empty state, count badge on trigger.
+   113→   113→- Share links:
+   114→   114→  - share.ts: URL-safe base64 codec (TextEncoder/Decoder, +/→-_) + buildShareUrl; Toolbar share button copies link (clipboard w/ toast fallback showing URL); PlannerWorkspace effect parses ?plan= on mount → applySnapshot + toast + history.replaceState cleanup; invalid code → destructive toast.
+   115→   115→- Toolbar fit polish (styling mandate): measured children (1399 px needed vs 1230 available) → template select 150 px, view-toggle labels / fire-safety text / brand name now hidden below 2xl (all return at ≥1536 px), gap 2. Toolbar now one row (59 px) at 1440 and wraps gracefully below; mobile 390 px has zero horizontal overflow.
+   116→   116→- E2E verified via agent-browser: save "QA Test Café" (toast + thumbnail row + badge 1), template switch → load saved (back to 32 items/15 seats), 2-step delete (confirm state ON → DELETE OK, API list []), place chair → Undo button enable → 16→15→16 via buttons AND Ctrl+Z/Ctrl+Y, share copy ("Share link copied"), opening captured ?plan=… URL restores exact layout (32 items/15 seats).
+   117→   117→
+   118→   118→Stage Summary:
+   119→   119→- New capabilities: full undo/redo, persistent saved-layouts library (SQLite via Prisma + REST API), one-click shareable layout URLs, thumbnails generated client-side.
+   120→   120→- Files: prisma/schema.prisma; src/app/api/layouts/{route.ts,[id]/route.ts}; src/lib/planner/{store.ts,share.ts,thumbnail.ts}; src/components/planner/{Toolbar.tsx,LayoutsMenu.tsx,PlannerWorkspace.tsx}.
+   121→   121→- Lint 0 errors; dev.log clean; desktop 1440 + mobile 390 QA passed; leftover test row deleted (DB back to empty).
+   122→   122→- Next-round ideas (priority): light/dark theme toggle; item context menu (right-click rotate/duplicate/delete); layout diff history panel; per-item price override; multi-room/zone support; SoundCloud-style public gallery of shared layouts (server-rendered page with OG image).
+   123→   123→
+   124→   124→---
+   125→   125→Task ID: 6
+   126→   126→Agent: Z.ai Code (cron webDevReview)
+   127→   127→Task: Round 2 — QA sweep + Night-Studio dark theme + item context menu + camera zoom controls + per-item price override
+   128→   128→
+   129→   129→Work Log:
+   130→   130→- Status assessment: v1.1 stable before this round (lint 0 errors, GET / 200, console clean, agent-browser desktop 1440 + mobile 390 sweep found no bugs; templates/capacity/brand sections + footer verified). Phase = stable → new-feature round per mandate.
+   131→   131→- Night-Studio dark mode (next-themes, already installed):
+   132→   132→  - globals.css: converted FORMA palette tokens (charcoal/oat/warmwhite) from literal @theme values to var() indirection so `.dark` overrides them at runtime; added a full `.dark` block — warm espresso shadcn tokens (background #17140F, card #201C16, popover #241F19…) AND warm remaps of the default tailwind scales (--color-white → #262119, stone-50…950 flipped to warm darks) so every hand-rolled `bg-white`/`text-stone-*` utility re-themes with zero component changes; dark variants for .blueprint-grid, .blueprint-band, .thin-scroll, .card-glass, .chip-glass, ::selection, focus-visible ring, input[type=color] swatch.
+   133→   133→  - Scene.tsx: 3D viewport re-lights itself — DAY/NIGHT palettes (bg/fog/floor/apron/walls/grid/windows/threshold + ambient/hemi/sun intensities); Room/WallSegment take a `pal` prop; night scene is moody espresso with brand-colored furniture popping.
+   134→   134→  - ThemeProvider (next-themes, attribute=class, defaultTheme=light, disableTransitionOnChange) in layout.tsx; ThemeToggle (sun/moon cross-fade + rotate) in the sticky header; useSyncExternalStore mounted flag (lint-safe).
+   135→   135→  - Theme-proof fixes: footer rebuilt with literal always-dark ink colors (#211D17 band + warm gray text) so it stays a dark footer in both themes; template-card photo overlay gradient switched from from-charcoal/45 to literal #1F1B15 so photos keep a dark scrim in dark mode. Pair-contrast usages (bg-charcoal text-warmwhite CTAs) invert gracefully.
+   136→   136→- Right-click context menu (ItemContextMenu.tsx):
+   137→   137→  - R3F onContextMenu on each item group; rightDown ref guards against right-drag pan (6px threshold); onItemDown now ignores non-primary buttons; store state ctxMenu {uid,x,y} + openContextMenu/closeContextMenu; menu closes on Esc/wheel/outside pointerdown/any action; edge-clamped fixed positioning; ctx-glass + ctx-pop keyframe styles; menu shows item name + brand-colored price, custom-price badge, Rotate 90° (R), Duplicate (D), Edit price (jumps to selection popover via forma:edit-price event), destructive Remove (Del); selecting via menu syncs SelectionControls.
+   138→   138→- Camera zoom controls (ViewControls.tsx):
+   139→   139→  - Glass cluster on viewport left edge: Zoom in / Zoom out / Re-frame room with tooltips + shortcut hints; store zoomReq {kind,n} counter; CameraRig watches it — in/out dolly along the view vector eased via damp3 (clamped to OrbitControls min/max), fit replays the plan/3D home-position swing; keyboard: +/-/= zoom, F re-frame; also added D = duplicate shortcut in PlannerWorkspace.
+   140→   140→- Per-item price override:
+   141→   141→  - types.ts PlacedItem.price?: number; store setItemPrice(uid, price|null) with history push; computeCost groups custom-priced units into separate lines (key id::unit) and flags them custom; CostPanel renders amber CUSTOM chips + "custom unit prices applied" note; SelectionControls gained a price popover (BadgeDollarSign trigger, $ input, Apply, reset-to-list) with custom-price dot indicator; flows through undo/redo, share links, saved layouts and PDF export (all consume computeCost/snapshot as-is).
+   142→   142→  - store: ctxMenu cleared on all destructive/global actions (remove/loadTemplate/clearAll/applySnapshot/undo/redo/arm/select).
+   143→   143→- Styling details: breathing selection ring (scale osc in useFrame), grab cursor on item hover, hint chip copy updated (D duplicate · right-click for actions), hero tip kbd row now shows R/D/Del/F + right-click, dev-only window.__forma QA handle (NODE_ENV-guarded) for browser automation.
+   144→   144→- E2E verified via agent-browser: dark toggle (all sections + footer + 3D scene re-light screenshots at 1440), light restore, context menu open/duplicate (32→33)/edit price ($280→$200 custom), cost math ($20.5k + dup $280 − $80 discount = $20.7k ✓), CostPanel CUSTOM line + note, zoom in ×2 + re-frame fit, D shortcut + Ctrl+Z, plan/3D swing regression, mobile 390 (0px overflow, ViewControls + theme toggle fit), Corner Café template restored afterwards. Lint 0 errors; dev.log clean (only benign THREE warnings + transient Fast-Refresh reloads during edits).
+   145→   145→
+   146→   146→Stage Summary:
+   147→   147→- v1.2: Night-Studio dark theme (UI + 3D scene), right-click item actions, camera zoom/re-frame with keyboard shortcuts, per-item price overrides with live cost integration.
+   148→   148→- Files: src/app/{globals.css,layout.tsx,page.tsx}; src/components/{theme-provider.tsx,theme-toggle.tsx}; src/components/planner/{Scene.tsx,PlannerWorkspace.tsx,ItemContextMenu.tsx,ViewControls.tsx,ViewportHud.tsx,CostPanel.tsx,sections.tsx}; src/lib/planner/{store.ts,types.ts,capacity.ts}.
+   149→   149→- Next-round ideas (priority): public gallery of shared layouts (server-rendered + OG image), multi-room/zones, layout diff history panel, per-category budget caps, drag-from-catalog ghost improvements, a11y pass on 3D canvas (focusable viewport with roving instructions).
+   150→   150→
+   151→   151→---
+   152→   152→Task ID: 7
+   153→   153→Agent: Z.ai Code (cron webDevReview)
+   154→   154→Task: Round 3 — QA sweep (desktop+mobile) + Budget guardrails + Community gallery + CSV BOM + Shortcuts dialog
+   155→   155→
+   156→   156→Work Log:
+   157→   157→- Status assessment: v1.2 was stable (lint 0 errors, GET / 200). agent-browser sweep at 1440x900 + 390x844 re-verified all v1 features: fire toggle, plan/3D swing, brand recolor, cost math ($20,460), export build-up + PDF download, sections, footer, 0px mobile overflow.
+   158→   158→- Environment traps hit & solved (document for future rounds):
+   159→   159→  (a) Stale-cache ghosts: browser sessions that survive dev-server restarts serve old Turbopack chunks from HTTP cache — earlier "ThemeProvider is not defined" / "APRON_COLOR is not defined" / "getItem is not defined" errors were ALL this. Fix = agent-browser close + reopen (fresh session) after any dev-server restart; sources were never wrong.
+   160→   160→  (b) Dev server died mid-round (silent, likely supervisor cycle) → restarted via `nohup bun run dev >> dev.log 2>&1 &`; also did one full `rm -rf .next` rebuild to rule out cache corruption.
+   161→   161→- Budget guardrails (feature):
+   162→   162→  - store.ts: `budget: number | null` + setBudget() (clamped 0..2M), persisted via partialize (device-local; NOT in layout snapshots/undo).
+   163→   163→  - capacity.ts: computeCategoryBreakdown() (spend by category, server-safe), CATEGORY_META colors, budgetStatusOf() → under/close/over at 90%/100%.
+   164→   164→  - CostPanel.tsx: Budget guardrail card (input + 15k/25k/40k/60k presets + Clear), animated progress bar with role=progressbar, status chip, "over by $X" readout; Spend-by-category stacked ribbon + legend rows; Estimated total turns red when over.
+   165→   165→  - Toolbar.tsx: cost pill reacts — amber border when ≥90%, red tint + TriangleAlert icon + red amount when over, "/ budget" hint at 2xl.
+   166→   166→- Community gallery (feature): `CommunityGallery` in sections.tsx, mounted between CapacityGuide and BrandStrip; nav links (header + footer) added. Cards = SVG-plan thumbnail, venue chip (from VENUES via templateId), m² badge, seats/items meta, relative save time, "Open in the studio" → GET /api/layouts/[id] → applySnapshot + toast + smooth scroll to #planner. Live refresh via `forma:layouts-changed` window event (dispatched by LayoutsMenu on save/delete) + manual Refresh button; skeleton + dashed empty states; whileInView stagger animations.
+   167→   167→- API: GET /api/layouts now also returns seats (via catalog), areaM2, templateId per row (single-call gallery data; safeParse fallback keeps old rows working).
+   168→   168→- CSV BOM (feature): "BOM · CSV" button in CostPanel downloads a bill-of-materials (meta header w/ project/template/area/seats/date, line items w/ pricing flag, subtotal/install/contingency/total/budget) via Blob+a.click; slugified filename.
+   169→   169→- Shortcuts dialog (feature): ShortcutsDialog.tsx — "?" toggles a grouped cheat-sheet (Items/View/Session) with kbd chips; NEW keyboard shortcuts: 1 = plan view, 2 = 3D view (wired in PlannerWorkspace); tip line under workspace now advertises "?".
+   170→   170→- Seed data: scripts/seed-community.ts (bun + Prisma) — 6 curated layouts from templates + variations (Roastery lounge, Harbor Bakery, extra booths, desk cluster), inline SVG plan thumbnails (blueprint grid, glyph shapes in brand color, walls w/ door gaps); guarded to no-op when table non-empty. DB has 6 rows.
+   171→   171→- Styling details: community cards hover-lift + image zoom + brand-dot chips; budget bars w/ inset-track shadows + 500ms eased fills; preset chips with active charcoal state; glassy dialog header; nav "Community" link. Dark mode verified re-theming the new section (thumbnails intentionally stay light "paper on dark desk").
+   172→   172→- E2E verified via agent-browser: budget 25k/15k → Over ($3,896 / $13,896 over) red states; 40k → Under emerald 72%; pill red+alert at 15k; BOM CSV click clean (0 errors); "Open Bistro Verde in the studio" → 42 items/43 seats/toast/scroll; save "QA Round 7 Budget Test" → community card appeared instantly (event); DELETE via API 200; 1/2 keys swing views; mobile 390 = 0px overflow; lint 0 errors; 0 page errors on fresh session; test row deleted, template/budget/brand reset to defaults.
+   173→   173→
+   174→   174→Stage Summary:
+   175→   175→- v1.3: budget guardrails (panel + toolbar + CSV), community gallery wall (API-backed, seeded, live-refresh), keyboard shortcut sheet + 1/2 view keys.
+   176→   176→- Files: src/lib/planner/{store.ts,capacity.ts}; src/components/planner/{CostPanel.tsx,Toolbar.tsx,sections.tsx,LayoutsMenu.tsx,PlannerWorkspace.tsx,ShortcutsDialog.tsx (new)}; src/app/api/layouts/route.ts; src/app/page.tsx; scripts/seed-community.ts (new).
+   177→   177→- Known nits/risks: dev-server restarts strand long-lived browser sessions on stale cached chunks (QA-only, not user-facing); dev-tools "1 Issue" badge = benign THREE.Clock/PCFSoftShadowMap deprecation warnings (dev-only); seeded thumbs are SVG data-URLs (light paper look in dark mode is intentional).
+   178→   178→- Next-round ideas (priority): per-category budget caps; zone/area tints; layout diff history panel; OG meta + share-preview polish; a11y pass on 3D canvas (roving instructions, focusable viewport); prune seeded rows w/ a /api/layouts?limit param if gallery gets crowded.
+   179→   179→
+   180→   180→---
+   181→   181→Task ID: 8
+   182→   182→Agent: Z.ai Code (cron webDevReview)
+   183→   183→Task: Round 4 — QA sweep (desktop+mobile) + Readiness checks (exit-access compliance) + Layout insights + PNG plan export + OG/Twitter meta + template egress fixes
+   184→   184→
+   185→   185→Work Log:
+   186→   186→- Status assessment: v1.3 stable (lint 0, GET / 200, console clean). agent-browser sweep at 1440×900 + 390×844 re-verified: place/drag (32→33 via synthetic pointer events on canvas), undo (33→32), plan/3D keyboard swing (1/2 keys; toggle labels are hidden <1536px so keyboard/store is the QA path), fire toggle (chevrons + EXIT frames + minimap dashed paths), cost math ($20.5k→$20.6k on placement). No bugs found → stable phase → new-feature round.
+   187→   187→- Shared egress module (NEW src/lib/planner/egress.ts): egressRoutes()/exitDoors() (Scene.tsx now imports waypoints from here — single source of truth), dischargeZones() (1.2 m deep × 1.1 m wide landing in front of both exit doors, IBC-style), dischargeBlockages() (rotated-AABB overlap ≥2 cm on both axes; NON_BLOCKING_IDS = pendant (ceiling-hung) + rug (walkable) excluded), sampleRoute() kept for future overlays.
+   188→   188→- Design decision (learned the hard way): full-route clearance checking (0.45 m off the drawn chevron paths) flags 5 items in EVERY curated template because the routes deliberately weave between tables → whack-a-mole. Pivoted to code-aligned **exit discharge zone** check (what inspectors actually care about) + kept routes purely visual. Thresholds: overlap → fail "N blocking".
+   189→   189→- ReadinessCard (NEW src/components/planner/InsightsCards.tsx): 4-row compliance checklist in the cost panel — Exit capacity (load vs 420), Seat density (m²/seat vs venue guide), Exit access (discharge zones; offender rows "name · main/rear exit" with click-to-locate = select(uid)+close panel so the breathing selection ring is visible), Budget guardrail. Pass/warn/fail/muted icon rings + chips, "N/4 passed" counter, contextual footer hint. Wire: ReadinessCard mounts above InsightsCard in CostPanel scroll area.
+   190→   190→- InsightsCard (same file): brand-colored SVG donut (animated stroke-dashoffset) for floor occupancy %, Cost/seat + Spend/m² with rAF count-up ticker (useCountUp, easeOutCubic, sub-cent skip to satisfy react-hooks/set-state-in-effect), furniture footprint m² readout, "Where the seats sit" seat-mix bars (top 4, animated widths). Helper computeInsights() added to capacity.ts.
+   191→   191→- Template egress fixes so every curated layout passes its own check: café shelf-unit 2.6→1.1 (was sitting in the rear landing), restaurant café-counter 1.8→0.95 + stools/pendants shifted west (counter w=2.4 reached into the rear landing), boutique checkout/sign 3.2→3.65 + mannequin −0.6→−0.95 + clothing-rail/pendant 2.2→1.5. All four templates verify "Exit access: Clear" (DOM loop across templates).
+   192→   192→- CapacityMeter live chip: spring-animated red "Exit access blocked — N items in the landing" button appears in the viewport HUD when a landing is blocked; click opens the cost panel (AnimatePresence height/opacity).
+   193→   193→- PNG plan export: "Plan · PNG" button next to BOM · CSV in CostPanel footer; renders the offscreen detailed PlanSVG (fire paths included when toggled) at 2× into a canvas with FORMA brand header strip + project meta line (name · m² · seats · total) → downloads forma-plan-<slug>.png + toast. Footer venue line now shows occupant load (58/420).
+   194→   194→- OG/Twitter meta polish (layout.tsx): metadataBase, og:image=/gallery/cafe.png w/h/alt, og:locale, twitter:card summary_large_image — verified tags render via curl.
+   195→   195→- Environment traps (documented): (a) headless renderer occasionally crashes to about:blank after heavy synthetic pointer/eval storms → recover by `agent-browser open` again; zustand persist then re-adds state (a test booth survived a reload via localStorage persistence — legit behavior). (b) Full-viewport screenshots of the open Sheet showed a stale LIGHT composite even after dark-mode flips, while element-level screenshots (`screenshot '<selector>' path`) + getComputedStyle were correct — QA dark-mode surfaces via ELEMENT screenshots, not viewport captures.
+   196→   196→- E2E verified: 4/4 templates Exit access Clear; negative case booth@landing → meter chip + panel "1 blocking" → locate click → panel closes + booth selected; second booth → "2 items" (duplicate persistence across reload via zustand persist — correct); PNG export downloaded & inspected (brand header, meta line, north arrow, scale bar); OG tags rendered; mobile 390 = 0px overflow with all new cards fitting; dark mode via element capture (espresso cards, warm text, brand donut); lint 0 errors; console clean; test state cleaned (32 items, café, no budget).
+   197→   197→
+   198→   198→Stage Summary:
+   199→   199→- v1.4: compliance "Readiness checks" (exit-access discharge zones, density, budget) with click-to-locate offenders + viewport warning chip; "Layout insights" (occupancy donut, cost/seat, spend/m², seat mix) with animated tickers; PNG plan export; OG/Twitter share preview; curated templates now pass their own egress checks.
+   200→   200→- Files: src/lib/planner/{egress.ts (new), capacity.ts, templates.ts}; src/components/planner/{InsightsCards.tsx (new), CostPanel.tsx, CapacityMeter.tsx, Scene.tsx}; src/app/layout.tsx.
+   201→   201→- Known nits/risks: readiness "Tight" on Studio Works (4.9 m²/seat vs 4.6×1.25 guide) is honest, not a bug; seeded community rows (DB) still snapshot pre-fix layouts — loading one may show a landing warning (acceptable, user-shaped data); PlanSVG detailed labels can clip on long names in PNG export (pre-existing).
+   202→   202→- Next-round ideas (priority): per-category budget caps; zone/area tints; layout diff history panel; first-visit coach tour; a11y pass on the 3D canvas (roving instructions); /api/layouts?limit param for the community gallery.
+   203→   203→

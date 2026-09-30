@@ -29,22 +29,28 @@ const createBody = z.object({
   thumb: z.string().max(400_000).optional(),
 })
 
-/** GET /api/layouts — list recent saved layouts (newest first). */
-export async function GET() {
+/** GET /api/layouts?limit=N — list recent saved layouts (newest first, with total count). */
+export async function GET(req: Request) {
   try {
-    const rows = await db.savedLayout.findMany({
-      orderBy: { updatedAt: 'desc' },
-      take: 24,
-      select: {
-        id: true,
-        name: true,
-        brandColor: true,
-        thumb: true,
-        data: true,
-        updatedAt: true,
-      },
-    })
+    const limitRaw = Number(new URL(req.url).searchParams.get('limit'))
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(96, Math.floor(limitRaw)) : 24
+    const [rows, total] = await Promise.all([
+      db.savedLayout.findMany({
+        orderBy: { updatedAt: 'desc' },
+        take: limit,
+        select: {
+          id: true,
+          name: true,
+          brandColor: true,
+          thumb: true,
+          data: true,
+          updatedAt: true,
+        },
+      }),
+      db.savedLayout.count(),
+    ])
     return NextResponse.json({
+      total,
       layouts: rows.map((r) => {
         const parsed = safeParse(r.data)
         return {

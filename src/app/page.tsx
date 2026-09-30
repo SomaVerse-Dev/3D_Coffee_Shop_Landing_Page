@@ -56,9 +56,19 @@ export default function Home() {
             aria-hidden
             className="blueprint-band pointer-events-none absolute inset-x-4 -top-6 -z-10 h-52 opacity-80 sm:inset-x-6"
           />
+          {/* soft brand-tinted wash behind the headline */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -top-10 left-1/2 -z-10 h-72 w-[640px] max-w-[92vw] -translate-x-1/2 rounded-full opacity-70 blur-3xl"
+            style={{ background: 'radial-gradient(closest-side, color-mix(in srgb, var(--chart-1) 14%, transparent), transparent)' }}
+          />
           <div className="grid items-end gap-6 lg:grid-cols-[1fr_auto]">
             <div>
               <p className="font-display inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500 shadow-xs">
+                <span className="relative inline-flex h-2 w-2" aria-hidden>
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60" style={{ backgroundColor: 'var(--chart-1)' }} />
+                  <span className="relative inline-flex h-2 w-2 rounded-full" style={{ backgroundColor: 'var(--chart-1)' }} />
+                </span>
                 <Compass className="h-3.5 w-3.5" style={{ color: 'var(--chart-1)' }} />
                 For cafés · co-working · boutique retail
               </p>
@@ -78,11 +88,19 @@ export default function Home() {
                 { icon: Flame, k: '2 exits', v: 'egress checked live' },
                 { icon: ArrowDown, k: '1 PDF', v: 'layout sheet export' },
               ].map((s) => (
-                <div key={s.v} className="flex flex-col justify-end">
-                  <dd className="font-display order-1 text-2xl font-bold leading-none tabular-nums tracking-tight text-charcoal">
+                <div
+                  key={s.v}
+                  className="group flex flex-col justify-end transition-transform duration-200 hover:-translate-y-0.5"
+                >
+                  <dd className="font-display relative order-1 text-2xl font-bold leading-none tabular-nums tracking-tight text-charcoal">
                     {s.k}
+                    <span
+                      aria-hidden
+                      className="absolute -bottom-1.5 left-0 h-0.5 w-0 rounded-full transition-all duration-300 group-hover:w-full"
+                      style={{ backgroundColor: 'var(--chart-1)' }}
+                    />
                   </dd>
-                  <dt className="order-2 mt-2 inline-flex items-center gap-1.5 text-[10.5px] font-medium uppercase tracking-[0.12em] text-stone-400">
+                  <dt className="order-2 mt-2 inline-flex items-center gap-1.5 text-[10.5px] font-medium uppercase tracking-[0.12em] text-stone-400 transition-colors duration-200 group-hover:text-stone-500">
                     <s.icon className="h-3 w-3 text-stone-400" />
                     {s.v}
                   </dt>
@@ -101,7 +119,7 @@ export default function Home() {
             <kbd className="ml-1 rounded border border-stone-300 bg-white px-1 font-mono text-[10px] shadow-xs">Del</kbd> remove ·
             <kbd className="ml-1 rounded border border-stone-300 bg-white px-1 font-mono text-[10px] shadow-xs">F</kbd> re-frame ·
             <kbd className="ml-1 rounded border border-stone-300 bg-white px-1 font-mono text-[10px] shadow-xs">?</kbd> all shortcuts ·
-            right-click any piece for quick actions.
+            right-click any piece for quick actions · re-open the tour from the toolbar&apos;s <span className="font-semibold text-stone-500">help</span> menu.
           </p>
         </section>
 

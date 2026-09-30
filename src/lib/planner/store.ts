@@ -4,6 +4,9 @@ import type { PlacedItem, RoomSpec, TemplateId, ViewMode } from './types'
 import { makeUid } from './types'
 import { getItem, halfExtents } from './catalog'
 import { TEMPLATES } from './templates'
+import { computeCapacity, computeCost } from './capacity'
+
+const CHECKPOINT_LIMIT = 12
 
 const SNAP = 0.05
 const HISTORY_LIMIT = 60
@@ -34,6 +37,17 @@ export interface LayoutSnapshot {
   templateId: TemplateId | 'custom'
 }
 
+/** A named, device-local checkpoint of the session (undo-safe restore). */
+export interface SessionCheckpoint {
+  id: string
+  label: string
+  ts: number
+  snap: LayoutSnapshot
+  itemCount: number
+  seats: number
+  cost: number
+}
+
 interface PlannerState {
   room: RoomSpec
   items: PlacedItem[]
@@ -48,6 +62,8 @@ interface PlannerState {
   templateId: TemplateId | 'custom'
   /** optional fit-out budget in USD (device-local preference, not part of layout snapshots) */
   budget: number | null
+  /** named session checkpoints (device-local, restored from the History popover) */
+  checkpoints: SessionCheckpoint[]
   /** mirrors of the module-level history lengths so the UI can react */
   undoDepth: number
   redoDepth: number
@@ -77,6 +93,10 @@ interface PlannerState {
   setProjectName: (name: string) => void
   /** set the fit-out budget in USD (null clears it) */
   setBudget: (usd: number | null) => void
+  /** capture a named checkpoint of the current session (max 12, newest first) */
+  saveCheckpoint: (label?: string) => SessionCheckpoint
+  /** remove one checkpoint by id */
+  deleteCheckpoint: (id: string) => void
   loadTemplate: (id: TemplateId) => void
   clearAll: () => void
   /** replace the whole layout (undo/redo, saved layouts, share links) */
@@ -137,6 +157,7 @@ export const usePlanner = create<PlannerState>()(
       projectName: TEMPLATES.cafe.projectName,
       templateId: 'cafe',
       budget: null,
+      checkpoints: [],
       undoDepth: 0,
       redoDepth: 0,
       ctxMenu: null,
@@ -266,6 +287,27 @@ export const usePlanner = create<PlannerState>()(
           budget: usd === null ? null : Math.max(0, Math.min(2_000_000, Math.round(usd))),
         }),
 
+      saveCheckpoint: (label) => {
+        const s = get()
+        const snap = snapshotOf(s)
+        const cap = computeCapacity(s.items, s.room, s.templateId === 'custom' ? 'cafe' : s.templateId)
+        const cost = computeCost(s.items)
+        const cp: SessionCheckpoint = {
+          id: makeUid(),
+          label: (label?.trim() || `${s.projectName} · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`).slice(0, 80),
+          ts: Date.now(),
+          snap,
+          itemCount: s.items.length,
+          seats: cap.seats,
+          cost: cost.total,
+        }
+        set((st) => ({ checkpoints: [cp, ...st.checkpoints].slice(0, CHECKPOINT_LIMIT) }))
+        return cp
+      },
+
+      deleteCheckpoint: (id) =>
+        set((s) => ({ checkpoints: s.checkpoints.filter((c) => c.id !== id) })),
+
       loadTemplate: (id) => {
         pushHistory(get(), 'template')
         set(() => {
@@ -354,6 +396,7 @@ export const usePlanner = create<PlannerState>()(
         projectName: s.projectName,
         templateId: s.templateId,
         budget: s.budget,
+        checkpoints: s.checkpoints,
       }),
     },
   ),

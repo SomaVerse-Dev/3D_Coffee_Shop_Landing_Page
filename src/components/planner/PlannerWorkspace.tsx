@@ -10,6 +10,7 @@ import ExportModal from './ExportModal'
 import ItemContextMenu from './ItemContextMenu'
 import ViewControls from './ViewControls'
 import ShortcutsDialog from './ShortcutsDialog'
+import CoachTour from './CoachTour'
 import { CapacityMeter } from './CapacityMeter'
 import { HintChip, PlanMinimap, SelectionControls } from './ViewportHud'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
@@ -118,7 +119,7 @@ export default function PlannerWorkspace() {
 
       <div className="flex">
         {/* desktop catalog */}
-        <aside className="hidden w-[292px] shrink-0 border-r border-stone-200/70 lg:block" aria-label="Furniture library">
+        <aside className="hidden w-[292px] shrink-0 border-r border-stone-200/70 lg:block" aria-label="Furniture library" data-tour="catalog">
           {mounted ? (
             <div className="h-[560px]">
               <CatalogSidebar />
@@ -129,7 +130,7 @@ export default function PlannerWorkspace() {
         </aside>
 
         {/* viewport */}
-        <div className="blueprint-grid relative min-h-[440px] flex-1 lg:h-[560px]">
+        <div className="blueprint-grid relative min-h-[440px] flex-1 lg:h-[560px]" data-tour="canvas">
           {!mounted ? (
             <ViewportSkeleton />
           ) : (
@@ -184,6 +185,7 @@ export default function PlannerWorkspace() {
       <CostPanel />
       <ExportModal open={exportOpen} onOpenChange={setExportOpen} />
       <ShortcutsDialog />
+      <CoachTour />
     </div>
   )
 }

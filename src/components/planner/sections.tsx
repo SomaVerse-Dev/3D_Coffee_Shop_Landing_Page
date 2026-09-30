@@ -295,6 +295,8 @@ const LAYOUTS_CHANGED_EVENT = 'forma:layouts-changed'
 
 export function CommunityGallery() {
   const [rows, setRows] = useState<GalleryRow[] | null>(null)
+  const [total, setTotal] = useState(0)
+  const [visible, setVisible] = useState(8)
   const [loading, setLoading] = useState(true)
   const [loadingId, setLoadingId] = useState<string | null>(null)
   const applySnapshot = usePlanner((s) => s.applySnapshot)
@@ -303,11 +305,13 @@ export function CommunityGallery() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch('/api/layouts', { cache: 'no-store' })
-      const json = (await res.json()) as { layouts?: GalleryRow[] }
+      const res = await fetch('/api/layouts?limit=48', { cache: 'no-store' })
+      const json = (await res.json()) as { layouts?: GalleryRow[]; total?: number }
       setRows(json.layouts ?? [])
+      setTotal(json.total ?? json.layouts?.length ?? 0)
     } catch {
       setRows([])
+      setTotal(0)
     } finally {
       setLoading(false)
     }
@@ -350,16 +354,23 @@ export function CommunityGallery() {
             every wall, seat and brand color comes with it, ready to make yours.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void load()}
-          className="h-8 gap-1.5 rounded-full border-stone-300/80 bg-white text-xs font-medium shadow-xs hover:bg-white"
-          aria-label="Refresh community layouts"
-        >
-          <RefreshCw className={cn('h-3 w-3 text-stone-400', loading && 'animate-spin')} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-3">
+          {rows && rows.length > 0 && (
+            <span className="hidden rounded-full border border-stone-200 bg-white px-2.5 py-1 text-[10.5px] font-semibold tabular-nums text-stone-500 shadow-xs sm:inline-flex">
+              {rows.length === total ? `${total} plan${total === 1 ? '' : 's'} on the wall` : `${rows.length} of ${total} plans`}
+            </span>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void load()}
+            className="h-8 gap-1.5 rounded-full border-stone-300/80 bg-white text-xs font-medium shadow-xs hover:bg-white"
+            aria-label="Refresh community layouts"
+          >
+            <RefreshCw className={cn('h-3 w-3 text-stone-400', loading && 'animate-spin')} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* grid */}
@@ -387,7 +398,7 @@ export function CommunityGallery() {
           </div>
         )}
 
-        {rows && rows.length > 0 && rows.map((row, i) => {
+        {rows && rows.length > 0 && rows.slice(0, visible).map((row, i) => {
           const venue = VENUES[row.templateId as 'cafe']
           return (
             <motion.article
@@ -455,6 +466,22 @@ export function CommunityGallery() {
           )
         })}
       </div>
+
+      {/* load more */}
+      {rows && rows.length > visible && (
+        <div className="mt-6 flex justify-center">
+          <Button
+            variant="outline"
+            onClick={() => setVisible((v) => v + 8)}
+            className="h-9 gap-1.5 rounded-full border-stone-300/80 bg-white px-5 text-xs font-semibold text-charcoal shadow-xs transition-all hover:border-stone-400 hover:shadow-sm"
+          >
+            Load more layouts
+            <span className="rounded-full bg-stone-100 px-1.5 py-px text-[10px] font-semibold tabular-nums text-stone-500">
+              +{Math.min(8, rows.length - visible)}
+            </span>
+          </Button>
+        </div>
+      )}
 
       {/* footnote */}
       <p className="mt-6 flex items-center justify-center gap-1.5 text-center text-[11px] text-stone-400">
