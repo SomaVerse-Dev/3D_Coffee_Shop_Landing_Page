@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from 'react'
 import {
-  Calculator, Download, ImageDown, Info, Landmark, PenLine, SlidersHorizontal, Target, TriangleAlert, Wallet,
+  Calculator, Download, ImageDown, Info, Landmark, LayoutGrid, PenLine, SlidersHorizontal, Target, TriangleAlert, Wallet,
 } from 'lucide-react'
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
@@ -17,6 +17,8 @@ import {
 } from '@/lib/planner/capacity'
 import type { Category } from '@/lib/planner/types'
 import { TEMPLATES } from '@/lib/planner/templates'
+import { ZONE_META, computeZoneStats } from '@/lib/planner/zones'
+import { openZoneEditor } from '@/lib/planner/events'
 import { InsightsCard, ReadinessCard } from './InsightsCards'
 import PlanSVG from './PlanSVG'
 import { useToast } from '@/hooks/use-toast'
@@ -412,6 +414,9 @@ export default function CostPanel() {
               </p>
             </section>
 
+            {/* ── zone breakdown (area / seats / spend per zone) ───── */}
+            <ZoneBreakdownCard />
+
             {/* ── readiness checks (compliance) ────────────────────── */}
             <div className="mt-4">
               <ReadinessCard />
@@ -576,5 +581,101 @@ function Button2({ children, onClick, disabled }: { children: React.ReactNode; o
     >
       {children}
     </button>
+  )
+}
+
+/** per-zone area / seats / spend — feeds the "open zone editor" shortcut */
+function ZoneBreakdownCard() {
+  const zones = usePlanner((s) => s.zones)
+  const items = usePlanner((s) => s.items)
+  const room = usePlanner((s) => s.room)
+  const brand = usePlanner((s) => s.brandColor)
+  const stats = useMemo(() => computeZoneStats(zones, items, room), [zones, items, room])
+
+  if (zones.length === 0) {
+    return (
+      <section aria-label="Zone breakdown" className="mt-4 rounded-xl border border-dashed border-stone-300 bg-white/60 p-3.5">
+        <p className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+          <LayoutGrid className="h-3.5 w-3.5 text-stone-400" />
+          Zone breakdown
+        </p>
+        <p className="mt-1.5 text-[11px] leading-relaxed text-stone-400">
+          Sketch service / seating / retail zones to see the floor split by area, seats and spend.
+        </p>
+        <button
+          type="button"
+          onClick={openZoneEditor}
+          className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-stone-300/80 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-charcoal shadow-xs transition-colors hover:border-stone-400 hover:bg-stone-50"
+        >
+          <PenLine className="h-3 w-3" />
+          Open the zone editor
+        </button>
+      </section>
+    )
+  }
+
+  return (
+    <section aria-label="Zone breakdown" className="mt-4 rounded-xl border border-stone-200/80 bg-white/80 p-3.5 shadow-xs">
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+          <LayoutGrid className="h-3.5 w-3.5" style={{ color: brand }} />
+          Zone breakdown
+        </p>
+        <button
+          type="button"
+          onClick={openZoneEditor}
+          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-stone-400 transition-colors hover:bg-stone-100 hover:text-charcoal"
+          title="Draw, move or rename zones"
+        >
+          <PenLine className="h-3 w-3" aria-hidden />
+          Edit
+        </button>
+      </div>
+      <ul className="mt-2.5 space-y-2">
+        {stats.map(({ zone, area, seats, spend, pieces, pctOfFloor }) => {
+          const color = ZONE_META[zone.kind].color
+          return (
+            <li key={zone.id}>
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} aria-hidden />
+                <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-charcoal">{zone.label}</span>
+                {seats > 0 && (
+                  <span className="shrink-0 rounded bg-stone-100 px-1 py-px text-[9px] font-bold tabular-nums text-stone-500" title={`${seats} seats inside`}>
+                    {seats} {seats === 1 ? 'seat' : 'seats'}
+                  </span>
+                )}
+                <span className="w-12 shrink-0 text-right text-[10.5px] font-medium tabular-nums text-stone-500" title={`${pieces} pieces inside`}>
+                  {area.toFixed(1)} m²
+                </span>
+                <span className="w-14 shrink-0 text-right text-[11px] font-semibold tabular-nums text-charcoal">
+                  {spend >= 1000 ? `$${(Math.round(spend / 100) / 10).toFixed(1)}k` : fmtMoney(spend)}
+                </span>
+              </div>
+              <div className="mt-1 flex items-center gap-1.5 pl-4">
+                <div
+                  className="h-1.5 flex-1 overflow-hidden rounded-full bg-stone-100 shadow-[inset_0_1px_2px_rgba(46,43,38,0.08)]"
+                  role="meter"
+                  aria-label={`${zone.label} share of floor area`}
+                  aria-valuenow={Math.round(pctOfFloor * 100)}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
+                  <div
+                    className="h-full rounded-full transition-[width] duration-500 ease-out"
+                    style={{ width: `${Math.min(100, pctOfFloor * 100)}%`, backgroundColor: color }}
+                  />
+                </div>
+                <span className="w-11 shrink-0 text-right text-[9.5px] font-semibold tabular-nums text-stone-400">
+                  {Math.round(pctOfFloor * 100)}% floor
+                </span>
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+      <p className="mt-2 text-[10px] leading-snug text-stone-400">
+        An item counts toward a zone when its center falls inside; zones may overlap, so shares can sum past 100%.
+      </p>
+    </section>
   )
 }

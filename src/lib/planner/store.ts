@@ -1,10 +1,13 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Category, PlacedItem, RoomSpec, TemplateId, ViewMode, ZoneDef } from './types'
+import type { Category, PlacedItem, RoomSpec, TemplateId, ViewMode, ZoneDef, ZoneKind } from './types'
 import { makeUid } from './types'
 import { getItem, halfExtents } from './catalog'
 import { TEMPLATES } from './templates'
 import { computeCapacity, computeCost } from './capacity'
+
+/** smallest zone allowed (keeps rects grabbable and labels readable) */
+const ZONE_MIN = 0.6
 
 const CHECKPOINT_LIMIT = 12
 
@@ -26,6 +29,24 @@ export function clampToRoom(
     x: Math.min(mx, Math.max(-mx, x)),
     z: Math.min(mz, Math.max(-mz, z)),
   }
+}
+
+/**
+ * Keep a zone rect inside the room on a 10 cm grid.
+ * Returns null when nothing changed (so callers can skip state writes).
+ */
+export function clampZoneRect(
+  zn: { x: number; z: number; w: number; d: number },
+  room: RoomSpec,
+): { x: number; z: number; w: number; d: number } | null {
+  const w = Math.min(room.w, Math.max(ZONE_MIN, Math.round(zn.w * 10) / 10))
+  const d = Math.min(room.d, Math.max(ZONE_MIN, Math.round(zn.d * 10) / 10))
+  const mx = Math.max(0, room.w / 2 - w / 2)
+  const mz = Math.max(0, room.d / 2 - d / 2)
+  const x = Math.round(Math.min(mx, Math.max(-mx, zn.x)) * 10) / 10
+  const z = Math.round(Math.min(mz, Math.max(-mz, zn.z)) * 10) / 10
+  if (w === zn.w && d === zn.d && x === zn.x && z === zn.z) return null
+  return { x, z, w, d }
 }
 
 /** Serializable snapshot of everything a saved/shared layout needs. */
@@ -85,6 +106,14 @@ interface PlannerState {
   zoomReq: { kind: 'in' | 'out' | 'fit'; n: number }
 
   setRoom: (w: number, d: number) => void
+  /** create a functional zone (defaults to a 3×2 m rect at room center); returns the new zone */
+  addZone: (init?: Partial<Omit<ZoneDef, 'id'>>) => ZoneDef
+  /** patch one zone (label, kind, x, z, w, d) — drag-friendly, undo-coalesced */
+  updateZone: (id: string, patch: Partial<Omit<ZoneDef, 'id'>>, opts?: { silent?: boolean }) => void
+  /** push one undo checkpoint before a drag gesture (drag deltas then update silently) */
+  beginZoneEdit: () => void
+  /** delete a zone by id */
+  removeZone: (id: string) => void
   addItem: (catalogId: string, x: number, z: number) => void
   moveItem: (uid: string, x: number, z: number) => void
   rotateItem: (uid: string) => void
@@ -115,6 +144,8 @@ interface PlannerState {
   /** remove one checkpoint by id */
   deleteCheckpoint: (id: string) => void
   loadTemplate: (id: TemplateId) => void
+  /** wipe every zone (used by "clear zones" in the editor) */
+  clearZones: () => void
   clearAll: () => void
   /** replace the whole layout (undo/redo, saved layouts, share links) */
   applySnapshot: (snap: LayoutSnapshot) => void
@@ -340,6 +371,59 @@ export const usePlanner = create<PlannerState>()(
 
       deleteCheckpoint: (id) =>
         set((s) => ({ checkpoints: s.checkpoints.filter((c) => c.id !== id) })),
+
+      addZone: (init) => {
+        pushHistory(get(), 'zone')
+        const s = get()
+        const base: Omit<ZoneDef, 'id'> = {
+          label: `Zone ${s.zones.length + 1}`,
+          kind: 'seating' as ZoneKind,
+          x: 0,
+          z: 0,
+          w: 3,
+          d: 2,
+          ...init,
+        }
+        const clamped = clampZoneRect(base, s.room) ?? base
+        const zn: ZoneDef = { id: makeUid(), ...base, ...clamped }
+        set((st) => ({ zones: [...st.zones, zn], showZones: true }))
+        syncDepth(set)
+        return zn
+      },
+
+      updateZone: (id, patch, opts) => {
+        if (!opts?.silent) pushHistory(get(), 'zone')
+        set((s) => {
+          const zn = s.zones.find((z) => z.id === id)
+          if (!zn) return s
+          const next = { ...zn, ...patch }
+          const clamped = clampZoneRect(next, s.room)
+          const merged = { ...next, ...(clamped ?? {}) }
+          if (
+            merged.label === zn.label && merged.kind === zn.kind &&
+            merged.x === zn.x && merged.z === zn.z && merged.w === zn.w && merged.d === zn.d
+          ) return s
+          return { zones: s.zones.map((z) => (z.id === id ? merged : z)) }
+        })
+        syncDepth(set)
+      },
+
+      removeZone: (id) => {
+        pushHistory(get(), 'zone')
+        set((s) => ({ zones: s.zones.filter((z) => z.id !== id) }))
+        syncDepth(set)
+      },
+
+      clearZones: () => {
+        pushHistory(get(), 'zone')
+        set({ zones: [] })
+        syncDepth(set)
+      },
+
+      beginZoneEdit: () => {
+        pushHistory(get(), 'zone')
+        syncDepth(set)
+      },
 
       loadTemplate: (id) => {
         pushHistory(get(), 'template')

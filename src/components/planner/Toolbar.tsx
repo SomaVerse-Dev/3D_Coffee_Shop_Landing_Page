@@ -1,6 +1,7 @@
 'use client'
 
-import { Box, Calculator, CircleHelp, DoorOpen, FileDown, Keyboard, LayoutGrid, LayoutTemplate, Link2, Map, Redo2, Ruler, SwatchBook, TriangleAlert, Undo2 } from 'lucide-react'
+import { Box, Calculator, CircleHelp, DoorOpen, FileDown, Keyboard, LayoutGrid, LayoutTemplate, Link2, Map, PenLine, Redo2, Ruler, SwatchBook, TriangleAlert, Undo2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,9 +17,11 @@ import { TEMPLATES, TEMPLATE_ORDER } from '@/lib/planner/templates'
 import { budgetStatusOf, computeCategorySpend, computeCost } from '@/lib/planner/capacity'
 import { BRAND_PRESETS, computedBrandName } from '@/lib/planner/brandNames'
 import { buildShareUrl } from '@/lib/planner/share'
+import { ZONE_EDITOR_EVENT } from '@/lib/planner/events'
 import { cn } from '@/lib/utils'
 import LayoutsMenu from './LayoutsMenu'
 import SessionHistory from './SessionHistory'
+import ZoneEditor from './ZoneEditor'
 import { SHORTCUTS_EVENT } from './ShortcutsDialog'
 import { startTour } from './CoachTour'
 
@@ -39,6 +42,7 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
   const showZones = usePlanner((s) => s.showZones)
   const toggleZones = usePlanner((s) => s.toggleZones)
   const zonesCount = usePlanner((s) => s.zones.length)
+  const [zoneEditorOpen, setZoneEditorOpen] = useState(false)
   const brandColor = usePlanner((s) => s.brandColor)
   const setBrandColor = usePlanner((s) => s.setBrandColor)
   const items = usePlanner((s) => s.items)
@@ -60,6 +64,13 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
     .filter(([c, cap]) => (catSpend[c as keyof typeof catSpend] ?? 0) > cap)
     .map(([c]) => c)
   const capAlert = budgetState?.status !== 'over' && overCapLabels.length > 0
+
+  // any component can request the zone editor via the window event
+  useEffect(() => {
+    const openEditor = () => setZoneEditorOpen(true)
+    window.addEventListener(ZONE_EDITOR_EVENT, openEditor)
+    return () => window.removeEventListener(ZONE_EDITOR_EVENT, openEditor)
+  }, [])
 
   function handleShare() {
     const url = buildShareUrl(getSnapshot())
@@ -199,7 +210,7 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
               aria-label={showZones ? 'Hide zone areas' : 'Show zone areas'}
               title={showZones ? 'Hide zone areas' : 'Show zone areas'}
               className={cn(
-                'flex h-9 items-center gap-1.5 rounded-lg border px-2.5 shadow-xs transition-all duration-150',
+                'flex h-9 items-center gap-1.5 rounded-l-lg border px-2.5 shadow-xs transition-all duration-150',
                 showZones
                   ? 'border-charcoal/30 bg-charcoal/[0.06] text-charcoal'
                   : 'border-stone-300/80 bg-white text-stone-400 hover:border-stone-400/70 hover:text-charcoal',
@@ -220,6 +231,23 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
           </TooltipTrigger>
           <TooltipContent side="bottom" className="text-xs">
             {showZones ? 'Zone areas on — click to hide the washes' : 'Zone areas off — show service / seating washes'}
+          </TooltipContent>
+        </Tooltip>
+
+        {/* zone editor */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => setZoneEditorOpen(true)}
+              aria-label="Edit zones"
+              title="Edit zones — draw, move, rename"
+              className="-ml-2 flex h-9 items-center rounded-r-lg border border-l-0 border-stone-300/80 bg-white px-2 text-stone-400 shadow-xs transition-all duration-150 hover:border-stone-400/70 hover:text-charcoal"
+            >
+              <PenLine className="h-3.5 w-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">
+            Edit zones — draw, move, rename, resize
           </TooltipContent>
         </Tooltip>
 
@@ -384,7 +412,7 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
                 : capAlert
                   ? `Over cap: ${overCapLabels.join(', ')} — open the estimate`
                   : budgetState
-                    ? `Budget: ${budgetState.status === 'over' ? 'over' : 'under'} — open the estimate`
+                    ? `Budget: ${budgetState.status === 'close' ? 'close to' : 'under'} budget — open the estimate`
                     : 'Open cost estimate'
             }
             data-tour="cost"
@@ -432,6 +460,8 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
           )}
         </div>
       </div>
+
+      <ZoneEditor open={zoneEditorOpen} onOpenChange={setZoneEditorOpen} />
     </TooltipProvider>
   )
 }

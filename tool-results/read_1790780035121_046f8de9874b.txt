@@ -1,0 +1,581 @@
+     1→'use client'
+     2→
+     3→import { useMemo, useRef, useState } from 'react'
+     4→import {
+     5→  Calculator, Download, ImageDown, Info, Landmark, PenLine, SlidersHorizontal, Target, TriangleAlert, Wallet,
+     6→} from 'lucide-react'
+     7→import {
+     8→  Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
+     9→} from '@/components/ui/sheet'
+    10→import { ScrollArea } from '@/components/ui/scroll-area'
+    11→import { Separator } from '@/components/ui/separator'
+    12→import { usePlanner } from '@/lib/planner/store'
+    13→import { getItem } from '@/lib/planner/catalog'
+    14→import {
+    15→  ALL_CATEGORIES, budgetStatusOf, computeCategoryBreakdown, computeCategorySpend, computeCapacity, computeCost,
+    16→  fmtMoney, VENUES, EXIT_CAPACITY, CATEGORY_META,
+    17→} from '@/lib/planner/capacity'
+    18→import type { Category } from '@/lib/planner/types'
+    19→import { TEMPLATES } from '@/lib/planner/templates'
+    20→import { InsightsCard, ReadinessCard } from './InsightsCards'
+    21→import PlanSVG from './PlanSVG'
+    22→import { useToast } from '@/hooks/use-toast'
+    23→import { cn } from '@/lib/utils'
+    24→
+    25→const BUDGET_PRESETS = [15_000, 25_000, 40_000, 60_000]
+    26→
+    27→const BUDGET_META = {
+    28→  under: { label: 'Under budget', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200', bar: 'bg-emerald-500' },
+    29→  close: { label: 'Close to budget', cls: 'bg-amber-100 text-amber-800 border-amber-200', bar: 'bg-amber-500' },
+    30→  over: { label: 'Over budget', cls: 'bg-red-100 text-red-700 border-red-200', bar: 'bg-red-500' },
+    31→} as const
+    32→
+    33→const CAP_META = {
+    34→  under: { chip: 'bg-emerald-100 text-emerald-800 border-emerald-200', bar: 'bg-emerald-500/80', icon: '✓' },
+    35→  close: { chip: 'bg-amber-100 text-amber-800 border-amber-200', bar: 'bg-amber-500', icon: '!' },
+    36→  over: { chip: 'bg-red-100 text-red-700 border-red-200', bar: 'bg-red-500', icon: '▲' },
+    37→} as const
+    38→
+    39→/** Build and download a bill-of-materials CSV for the current layout. */
+    40→function downloadBomCsv(
+    41→  projectName: string, templateId: string, areaM2: number, seats: number,
+    42→  lines: Array<{ name: string; qty: number; unit: number; total: number; custom?: boolean }>,
+    43→  subtotal: number, install: number, contingency: number, total: number, budget: number | null,
+    44→  caps: Array<{ label: string; cap: number; spend: number; status: 'under' | 'close' | 'over' }>,
+    45→) {
+    46→  const esc = (v: string | number) => {
+    47→    const s = String(v)
+    48→    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    49→  }
+    50→  const rows: string[] = []
+    51→  rows.push('FORMA — Bill of materials')
+    52→  rows.push(`Project,${esc(projectName || 'Untitled layout')}`)
+    53→  rows.push(`Template,${esc(templateId === 'custom' ? 'Custom layout' : TEMPLATES[templateId as 'cafe']?.name ?? templateId)}`)
+    54→  rows.push(`Floor area,${areaM2.toFixed(1)} m2`)
+    55→  rows.push(`Seats,${seats}`)
+    56→  rows.push(`Exported,${new Date().toISOString().slice(0, 10)}`)
+    57→  rows.push('')
+    58→  rows.push('Item,Qty,Unit price (USD),Line total (USD),Pricing')
+    59→  for (const l of lines) {
+    60→    rows.push([esc(l.name), l.qty, l.unit, l.total, l.custom ? 'custom' : 'catalog'].join(','))
+    61→  }
+    62→  rows.push('')
+    63→  rows.push(`Subtotal,,,${subtotal},`)
+    64→  rows.push(`Delivery & install (12%),,,${install},`)
+    65→  rows.push(`Contingency (8%),,,${contingency},`)
+    66→  rows.push(`Estimated total,,,${total},`)
+    67→  if (budget !== null) rows.push(`Budget,,,${budget},`)
+    68→  if (caps.length > 0) {
+    69→    rows.push('')
+    70→    rows.push('Category caps')
+    71→    rows.push('Category,Cap (USD),Spend (USD),Status')
+    72→    for (const c of caps) {
+    73→      rows.push([esc(c.label), c.cap, c.spend, c.status.toUpperCase()].join(','))
+    74→    }
+    75→  }
+    76→  const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' })
+    77→  const url = URL.createObjectURL(blob)
+    78→  const a = document.createElement('a')
+    79→  const slug = (projectName || 'layout').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'layout'
+    80→  a.href = url
+    81→  a.download = `forma-bom-${slug}.csv`
+    82→  document.body.appendChild(a)
+    83→  a.click()
+    84→  a.remove()
+    85→  setTimeout(() => URL.revokeObjectURL(url), 4000)
+    86→}
+    87→
+    88→export default function CostPanel() {
+    89→  const costOpen = usePlanner((s) => s.costOpen)
+    90→  const setCostOpen = usePlanner((s) => s.setCostOpen)
+    91→  const items = usePlanner((s) => s.items)
+    92→  const room = usePlanner((s) => s.room)
+    93→  const brand = usePlanner((s) => s.brandColor)
+    94→  const showFire = usePlanner((s) => s.showFire)
+    95→  const zones = usePlanner((s) => s.zones)
+    96→  const showZones = usePlanner((s) => s.showZones)
+    97→  const templateId = usePlanner((s) => s.templateId)
+    98→  const projectName = usePlanner((s) => s.projectName)
+    99→  const budget = usePlanner((s) => s.budget)
+   100→  const setBudget = usePlanner((s) => s.setBudget)
+   101→  const categoryBudgets = usePlanner((s) => s.categoryBudgets)
+   102→  const setCategoryBudget = usePlanner((s) => s.setCategoryBudget)
+   103→  const planPalette = usePlanner((s) => s.planPalette)
+   104→  const { toast } = useToast()
+   105→
+   106→  const [budgetDraft, setBudgetDraft] = useState('')
+   107→  const [capDrafts, setCapDrafts] = useState<Partial<Record<Category, string>>>({})
+   108→  const [pngBusy, setPngBusy] = useState(false)
+   109→  const cost = computeCost(items)
+   110→  const hasCustom = cost.lines.some((l) => (l as { custom?: boolean }).custom)
+   111→  const slices = useMemo(() => computeCategoryBreakdown(items), [items])
+   112→  const catSpend = useMemo(() => computeCategorySpend(items), [items])
+   113→  const pngSvgRef = useRef<SVGSVGElement | null>(null)
+   114→
+   115→  /** Render the hidden plan SVG into a 2× canvas and download it as a PNG sheet. */
+   116→  async function downloadPlanPng() {
+   117→    if (!pngSvgRef.current || pngBusy) return
+   118→    setPngBusy(true)
+   119→    try {
+   120→      const svg = pngSvgRef.current
+   121→      const xml = new XMLSerializer().serializeToString(svg)
+   122→      const img = new Image()
+   123→      const svgUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml)
+   124→      await new Promise<void>((resolve, reject) => {
+   125→        img.onload = () => resolve()
+   126→        img.onerror = () => reject(new Error('SVG render failed'))
+   127→        img.src = svgUrl
+   128→      })
+   129→      const scale = 2
+   130→      const W = img.width * scale
+   131→      const H = img.height * scale + 96
+   132→      const canvas = document.createElement('canvas')
+   133→      canvas.width = W
+   134→      canvas.height = H
+   135→      const ctx = canvas.getContext('2d')!
+   136→      ctx.fillStyle = '#FDFAF3'
+   137→      ctx.fillRect(0, 0, W, H)
+   138→      // header strip
+   139→      ctx.fillStyle = brand
+   140→      ctx.fillRect(28, 24, 22, 22)
+   141→      ctx.fillStyle = '#2E2B26'
+   142→      ctx.font = '700 26px system-ui, sans-serif'
+   143→      ctx.fillText('FORMA', 62, 43)
+   144→      ctx.font = '500 13px system-ui, sans-serif'
+   145→      ctx.fillStyle = '#8A8375'
+   146→      ctx.textAlign = 'right'
+   147→      ctx.fillText(`${projectName || 'Untitled project'} · ${(room.w * room.d).toFixed(0)} m² · ${seatCount} seats · ${fmtMoney(cost.total)}`, W - 28, 42)
+   148→      ctx.textAlign = 'left'
+   149→      ctx.drawImage(img, 0, 72, img.width * scale, img.height * scale)
+   150→
+   151→      const slug = (projectName || 'layout').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'layout'
+   152→      const a = document.createElement('a')
+   153→      a.href = canvas.toDataURL('image/png')
+   154→      a.download = `forma-plan-${slug}.png`
+   155→      document.body.appendChild(a)
+   156→      a.click()
+   157→      a.remove()
+   158→      toast({ title: 'Plan image saved', description: 'A high-resolution PNG of your floor plan was downloaded.' })
+   159→    } catch {
+   160→      toast({ title: 'Export failed', description: 'Could not render the plan image. Please try again.', variant: 'destructive' })
+   161→    } finally {
+   162→      setPngBusy(false)
+   163→    }
+   164→  }
+   165→
+   166→  // seat count via catalog
+   167→  const seatCount = useMemo(() => {
+   168→    let n = 0
+   169→    for (const it of items) {
+   170→      const cat = getItem(it.id)
+   171→      if (cat) n += cat.seats
+   172→    }
+   173→    return n
+   174→  }, [items])
+   175→
+   176→  const venue: 'cafe' | 'coworking' | 'boutique' | 'restaurant' = templateId === 'custom' ? 'cafe' : templateId
+   177→  const cap = useMemo(() => computeCapacity(items, room, venue), [items, room, venue])
+   178→
+   179→  const budgetState = budget !== null ? budgetStatusOf(cost.total, budget) : null
+   180→  const overBudget = budgetState?.status === 'over'
+   181→
+   182→  function commitBudget(raw: string) {
+   183→    const n = Number(raw.replace(/[^0-9]/g, ''))
+   184→    setBudget(raw.trim() === '' || Number.isNaN(n) || n <= 0 ? null : n)
+   185→  }
+   186→
+   187→  function commitCap(cat: Category, raw: string) {
+   188→    const n = Number(raw.replace(/[^0-9]/g, ''))
+   189→    setCategoryBudget(cat, raw.trim() === '' || Number.isNaN(n) || n <= 0 ? null : n)
+   190→    setCapDrafts((d) => {
+   191→      const next = { ...d }
+   192→      delete next[cat]
+   193→      return next
+   194→    })
+   195→  }
+   196→
+   197→  // caps summary: how many categories have caps and how they are doing
+   198→  const cappedCats = ALL_CATEGORIES.filter((c) => categoryBudgets[c] !== undefined)
+   199→  const overCaps = cappedCats.filter((c) => budgetStatusOf(catSpend[c], categoryBudgets[c]!).status === 'over')
+   200→  const closeCaps = cappedCats.filter((c) => budgetStatusOf(catSpend[c], categoryBudgets[c]!).status === 'close')
+   201→
+   202→  return (
+   203→    <Sheet open={costOpen} onOpenChange={setCostOpen}>
+   204→      <SheetContent side="right" className="flex w-[380px] max-w-[92vw] flex-col gap-0 border-stone-200 bg-warmwhite p-0 sm:max-w-[380px]">
+   205→        <SheetHeader className="border-b border-stone-200/80 bg-white/60 px-5 py-4">
+   206→          <SheetTitle className="font-display flex items-center gap-2 text-base font-bold text-charcoal">
+   207→            <Calculator className="h-4 w-4" style={{ color: brand }} />
+   208→            Cost estimate
+   209→          </SheetTitle>
+   210→          <SheetDescription className="text-xs text-stone-500">
+   211→            Rough fit-out totals — supply prices, updates live as you place items.
+   212→          </SheetDescription>
+   213→        </SheetHeader>
+   214→
+   215→        <ScrollArea className="min-h-0 flex-1">
+   216→          {/* grid track with minmax(0,1fr): keeps nowrap "truncate" rows from
+   217→              inflating the scroll-area's table layout beyond the panel width */}
+   218→          <div className="grid grid-cols-[minmax(0,1fr)] px-5 py-4">
+   219→            {/* ── budget guardrail ─────────────────────────────────── */}
+   220→            <section
+   221→              aria-label="Budget guardrail"
+   222→              className={cn(
+   223→                'rounded-xl border bg-white/80 p-3.5 shadow-xs transition-colors',
+   224→                overBudget ? 'border-red-300/80' : 'border-stone-200/80',
+   225→              )}
+   226→            >
+   227→              <div className="flex items-center justify-between gap-2">
+   228→                <p className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+   229→                  <Target className="h-3.5 w-3.5" style={{ color: brand }} />
+   230→                  Budget guardrail
+   231→                </p>
+   232→                {budget !== null && (
+   233→                  <button
+   234→                    onClick={() => { setBudgetDraft(''); setBudget(null) }}
+   235→                    className="rounded px-1.5 py-0.5 text-[10px] font-medium text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600"
+   236→                  >
+   237→                    Clear
+   238→                  </button>
+   239→                )}
+   240→              </div>
+   241→
+   242→              <div className="mt-2.5 flex items-center gap-2">
+   243→                <div className="relative flex-1">
+   244→                  <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-stone-400">$</span>
+   245→                  <input
+   246→                    inputMode="numeric"
+   247→                    value={budgetDraft || (budget !== null ? String(budget) : '')}
+   248→                    onChange={(e) => setBudgetDraft(e.target.value)}
+   249→                    onBlur={(e) => commitBudget(e.target.value)}
+   250→                    onKeyDown={(e) => {
+   251→                      if (e.key === 'Enter') { commitBudget((e.target as HTMLInputElement).value); (e.target as HTMLInputElement).blur() }
+   252→                    }}
+   253→                    placeholder="Set a budget…"
+   254→                    aria-label="Budget in US dollars"
+   255→                    className={cn(
+   256→                      'h-8 w-full rounded-lg border bg-white pl-6 pr-2 text-xs font-semibold tabular-nums text-charcoal shadow-xs outline-none transition-colors placeholder:font-normal placeholder:text-stone-300',
+   257→                      overBudget ? 'border-red-300 focus:border-red-400' : 'border-stone-200 focus:border-stone-400',
+   258→                    )}
+   259→                  />
+   260→                </div>
+   261→                {BUDGET_PRESETS.map((p) => (
+   262→                  <button
+   263→                    key={p}
+   264→                    onClick={() => { setBudgetDraft(''); setBudget(p) }}
+   265→                    aria-label={`Set budget ${p / 1000}k`}
+   266→                    className={cn(
+   267→                      'hidden h-8 shrink-0 rounded-lg border px-2 text-[10px] font-semibold tabular-nums transition-colors sm:block',
+   268→                      budget === p
+   269→                        ? 'border-charcoal bg-charcoal text-warmwhite'
+   270→                        : 'border-stone-200 bg-white text-stone-500 hover:border-stone-300 hover:text-charcoal',
+   271→                    )}
+   272→                  >
+   273→                    {p / 1000}k
+   274→                  </button>
+   275→                ))}
+   276→              </div>
+   277→
+   278→              {budget !== null && budgetState && (
+   279→                <div className="mt-3">
+   280→                  <div
+   281→                    role="progressbar"
+   282→                    aria-valuenow={Math.round(Math.min(100, budgetState.pct * 100))}
+   283→                    aria-valuemin={0}
+   284→                    aria-valuemax={100}
+   285→                    aria-label="Budget used"
+   286→                    className="h-2 w-full overflow-hidden rounded-full bg-stone-100 shadow-[inset_0_1px_2px_rgba(46,43,38,0.08)]"
+   287→                  >
+   288→                    <div
+   289→                      className={cn('h-full rounded-full transition-[width] duration-500 ease-out', BUDGET_META[budgetState.status].bar)}
+   290→                      style={{ width: `${Math.min(100, budgetState.pct * 100)}%` }}
+   291→                    />
+   292→                  </div>
+   293→                  <div className="mt-1.5 flex items-center justify-between text-[11px]">
+   294→                    <span className={cn('inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold', BUDGET_META[budgetState.status].cls)}>
+   295→                      {overBudget && <TriangleAlert className="h-3 w-3" aria-hidden />}
+   296→                      {BUDGET_META[budgetState.status].label}
+   297→                    </span>
+   298→                    <span className="tabular-nums text-stone-500">
+   299→                      <span className="font-semibold text-charcoal">{fmtMoney(cost.total)}</span>
+   300→                      {' / '}
+   301→                      {fmtMoney(budget)}
+   302→                      {overBudget && (
+   303→                        <span className="ml-1 font-semibold text-red-600">({fmtMoney(cost.total - budget)} over)</span>
+   304→                      )}
+   305→                    </span>
+   306→                  </div>
+   307→                </div>
+   308→              )}
+   309→            </section>
+   310→
+   311→            {/* ── category caps ─────────────────────────────────────── */}
+   312→            <section
+   313→              aria-label="Category caps"
+   314→              className={cn(
+   315→                'mt-4 rounded-xl border bg-white/80 p-3.5 shadow-xs transition-colors',
+   316→                overCaps.length > 0 ? 'border-red-300/80' : 'border-stone-200/80',
+   317→              )}
+   318→            >
+   319→              <div className="flex items-center justify-between gap-2">
+   320→                <p className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+   321→                  <SlidersHorizontal className="h-3.5 w-3.5" style={{ color: brand }} />
+   322→                  Category caps
+   323→                </p>
+   324→                {cappedCats.length > 0 && (
+   325→                  overCaps.length > 0 ? (
+   326→                    <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
+   327→                      <TriangleAlert className="h-3 w-3" aria-hidden />
+   328→                      {overCaps.length} over
+   329→                    </span>
+   330→                  ) : closeCaps.length > 0 ? (
+   331→                    <span className="rounded-full border border-amber-200 bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+   332→                      {closeCaps.length} close
+   333→                    </span>
+   334→                  ) : (
+   335→                    <span className="rounded-full border border-emerald-200 bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">
+   336→                      on track
+   337→                    </span>
+   338→                  )
+   339→                )}
+   340→              </div>
+   341→              <ul className="mt-2.5 space-y-1.5">
+   342→                {ALL_CATEGORIES.map((c) => {
+   343→                  const cap = categoryBudgets[c]
+   344→                  const spend = catSpend[c]
+   345→                  const st = cap !== undefined ? budgetStatusOf(spend, cap) : null
+   346→                  const meta = CATEGORY_META[c]
+   347→                  return (
+   348→                    <li key={c}>
+   349→                      <div className="flex items-center gap-2">
+   350→                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: meta.color }} aria-hidden />
+   351→                        <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-stone-600">{meta.label}</span>
+   352→                        <span className="w-14 shrink-0 text-right text-[11px] font-semibold tabular-nums text-charcoal">
+   353→                          {spend >= 1000 ? `$${(Math.round(spend / 100) / 10).toFixed(1)}k` : fmtMoney(spend)}
+   354→                        </span>
+   355→                        <div className="relative w-[72px] shrink-0">
+   356→                          <span className="pointer-events-none absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-stone-300">$</span>
+   357→                          <input
+   358→                            inputMode="numeric"
+   359→                            value={capDrafts[c] ?? (cap !== undefined ? String(cap) : '')}
+   360→                            onChange={(e) => setCapDrafts((d) => ({ ...d, [c]: e.target.value }))}
+   361→                            onBlur={(e) => commitCap(c, e.target.value)}
+   362→                            onKeyDown={(e) => {
+   363→                              if (e.key === 'Enter') {
+   364→                                commitCap(c, (e.target as HTMLInputElement).value)
+   365→                                ;(e.target as HTMLInputElement).blur()
+   366→                              }
+   367→                            }}
+   368→                            placeholder="cap"
+   369→                            aria-label={`${meta.label} spending cap in dollars`}
+   370→                            className={cn(
+   371→                              'h-7 w-full rounded-md border bg-white pl-4 pr-1.5 text-[10.5px] font-semibold tabular-nums text-charcoal shadow-xs outline-none transition-colors placeholder:font-normal placeholder:text-stone-300',
+   372→                              st?.status === 'over'
+   373→                                ? 'border-red-300 focus:border-red-400'
+   374→                                : cap !== undefined
+   375→                                  ? 'border-stone-300/90 focus:border-stone-400'
+   376→                                  : 'border-stone-200 focus:border-stone-400',
+   377→                            )}
+   378→                          />
+   379→                        </div>
+   380→                      </div>
+   381→                      {st && cap !== undefined && (
+   382→                        <div className="mt-1 flex items-center gap-1.5 pl-4">
+   383→                          <div
+   384→                            role="progressbar"
+   385→                            aria-valuenow={Math.round(Math.min(100, st.pct * 100))}
+   386→                            aria-valuemin={0}
+   387→                            aria-valuemax={100}
+   388→                            aria-label={`${meta.label} cap usage`}
+   389→                            className="h-1.5 flex-1 overflow-hidden rounded-full bg-stone-100 shadow-[inset_0_1px_2px_rgba(46,43,38,0.08)]"
+   390→                          >
+   391→                            <div
+   392→                              className={cn('h-full rounded-full transition-[width] duration-500 ease-out', CAP_META[st.status].bar)}
+   393→                              style={{ width: `${Math.min(100, st.pct * 100)}%` }}
+   394→                            />
+   395→                          </div>
+   396→                          <span
+   397→                            className={cn(
+   398→                              'w-11 shrink-0 text-right text-[9.5px] font-semibold tabular-nums',
+   399→                              st.status === 'over' ? 'text-red-600' : st.status === 'close' ? 'text-amber-700' : 'text-emerald-700',
+   400→                            )}
+   401→                          >
+   402→                            {Math.round(st.pct * 100)}%
+   403→                          </span>
+   404→                        </div>
+   405→                      )}
+   406→                    </li>
+   407→                  )
+   408→                })}
+   409→              </ul>
+   410→              <p className="mt-2 text-[10px] leading-snug text-stone-400">
+   411→                Caps stay on this device — they flag overspends per category while you place items.
+   412→              </p>
+   413→            </section>
+   414→
+   415→            {/* ── readiness checks (compliance) ────────────────────── */}
+   416→            <div className="mt-4">
+   417→              <ReadinessCard />
+   418→            </div>
+   419→
+   420→            {/* ── layout insights ──────────────────────────────────── */}
+   421→            <div className="mt-4">
+   422→              <InsightsCard />
+   423→            </div>
+   424→
+   425→            {/* ── category breakdown ───────────────────────────────── */}
+   426→            {slices.length > 0 && (
+   427→              <section aria-label="Spend by category" className="mt-4">
+   428→                <p className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+   429→                  <Wallet className="h-3.5 w-3.5 text-stone-400" />
+   430→                  Spend by category
+   431→                </p>
+   432→                {/* stacked ribbon */}
+   433→                <div className="mt-2.5 flex h-2.5 w-full gap-px overflow-hidden rounded-full bg-stone-100 shadow-[inset_0_1px_2px_rgba(46,43,38,0.08)]" aria-hidden>
+   434→                  {slices.map((s) => (
+   435→                    <div
+   436→                      key={s.category}
+   437→                      className="h-full transition-[width] duration-500 ease-out"
+   438→                      style={{ width: `${s.pct * 100}%`, backgroundColor: s.color }}
+   439→                    />
+   440→                  ))}
+   441→                </div>
+   442→                <ul className="mt-2.5 space-y-1">
+   443→                  {slices.map((s) => (
+   444→                    <li key={s.category} className="flex items-center gap-2 rounded-md px-1 py-0.5 text-[11px] transition-colors hover:bg-white/70">
+   445→                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: s.color }} aria-hidden />
+   446→                      <span className="min-w-0 flex-1 truncate font-medium text-stone-600">{s.label}</span>
+   447→                      <span className="shrink-0 tabular-nums text-stone-400">{Math.round(s.pct * 100)}%</span>
+   448→                      <span className="w-16 shrink-0 text-right font-semibold tabular-nums text-charcoal">{fmtMoney(s.total)}</span>
+   449→                    </li>
+   450→                  ))}
+   451→                </ul>
+   452→              </section>
+   453→            )}
+   454→
+   455→            {/* ── line items ───────────────────────────────────────── */}
+   456→            <section aria-label="Line items" className="mt-4">
+   457→              <p className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+   458→                <Landmark className="h-3.5 w-3.5 text-stone-400" />
+   459→                Bill of materials
+   460→                <span className="ml-auto font-sans text-[10px] font-medium normal-case tracking-normal text-stone-400">
+   461→                  {cost.lines.length} {cost.lines.length === 1 ? 'line' : 'lines'}
+   462→                </span>
+   463→              </p>
+   464→              {cost.lines.length === 0 ? (
+   465→                <p className="py-8 text-center text-xs text-stone-400">
+   466→                  Place furniture to build your estimate.
+   467→                </p>
+   468→              ) : (
+   469→                <ul className="mt-2 space-y-1">
+   470→                  {cost.lines.map((l) => {
+   471→                    const custom = (l as { custom?: boolean }).custom
+   472→                    return (
+   473→                      <li key={l.id} className="flex items-baseline justify-between gap-3 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-white/70">
+   474→                        <span className="min-w-0 flex-1 truncate font-medium text-stone-700">
+   475→                          {l.name}
+   476→                          {l.qty > 1 && <span className="ml-1.5 text-stone-400">×{l.qty}</span>}
+   477→                          {custom && (
+   478→                            <span className="ml-1.5 inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide text-amber-800">
+   479→                              <PenLine className="h-2.5 w-2.5" aria-hidden />
+   480→                              custom
+   481→                            </span>
+   482→                          )}
+   483→                        </span>
+   484→                        <span className={cn('shrink-0 tabular-nums', custom ? 'font-medium text-amber-700' : 'text-stone-400')}>
+   485→                          {fmtMoney(l.unit)}
+   486→                        </span>
+   487→                        <span className="w-20 shrink-0 text-right font-semibold tabular-nums text-charcoal">
+   488→                          {fmtMoney(l.total)}
+   489→                        </span>
+   490→                      </li>
+   491→                    )
+   492→                  })}
+   493→                </ul>
+   494→              )}
+   495→            </section>
+   496→          </div>
+   497→        </ScrollArea>
+   498→
+   499→        <div className="border-t border-stone-200/80 bg-white/70 px-5 py-4">
+   500→          <div className="space-y-1.5 text-xs text-stone-500">
+   501→            <div className="flex justify-between"><span>Subtotal</span><span className="tabular-nums">{fmtMoney(cost.subtotal)}</span></div>
+   502→            <div className="flex justify-between"><span>Delivery &amp; install · 12%</span><span className="tabular-nums">{fmtMoney(cost.install)}</span></div>
+   503→            <div className="flex justify-between"><span>Contingency · 8%</span><span className="tabular-nums">{fmtMoney(cost.contingency)}</span></div>
+   504→          </div>
+   505→          <Separator className="my-3" />
+   506→          {hasCustom && (
+   507→            <p className="mb-2 rounded-md bg-amber-100/70 px-2.5 py-1.5 text-[10.5px] font-medium text-amber-800">
+   508→              Custom unit prices applied — select an item in the room to adjust.
+   509→            </p>
+   510→          )}
+   511→          <div className="flex items-baseline justify-between">
+   512→            <span className="font-display text-sm font-semibold text-charcoal">Estimated total</span>
+   513→            <span className="font-display text-xl font-bold tabular-nums" style={{ color: overBudget ? '#B91C1C' : brand }}>
+   514→              {fmtMoney(cost.total)}
+   515→            </span>
+   516→          </div>
+   517→          <div className="mt-3 flex items-center gap-2">
+   518→            <Button2
+   519→              disabled={cost.lines.length === 0}
+   520→              onClick={() =>
+   521→                downloadBomCsv(
+   522→                  projectName, templateId, room.w * room.d, seatCount,
+   523→                  cost.lines, cost.subtotal, cost.install, cost.contingency, cost.total, budget,
+   524→                  cappedCats.map((c) => ({
+   525→                    label: CATEGORY_META[c].label,
+   526→                    cap: categoryBudgets[c]!,
+   527→                    spend: catSpend[c],
+   528→                    status: budgetStatusOf(catSpend[c], categoryBudgets[c]!).status,
+   529→                  })),
+   530→                )
+   531→              }
+   532→            >
+   533→              <Download className="h-3.5 w-3.5" />
+   534→              BOM · CSV
+   535→            </Button2>
+   536→            <Button2 onClick={downloadPlanPng} disabled={pngBusy || items.length === 0}>
+   537→              <ImageDown className="h-3.5 w-3.5" />
+   538→              {pngBusy ? 'Rendering…' : 'Plan · PNG'}
+   539→            </Button2>
+   540→            <p className="flex-1 text-[10px] leading-snug text-stone-400">
+   541→              Venue: {VENUES[venue].label.toLowerCase()} · {seatCount} {seatCount === 1 ? 'seat' : 'seats'} · load {cap.occupantLoad}/{EXIT_CAPACITY}
+   542→            </p>
+   543→          </div>
+   544→          <p className="mt-3 flex items-start gap-1.5 text-[10.5px] leading-relaxed text-stone-400">
+   545→            <Info className="mt-px h-3 w-3 shrink-0" />
+   546→            Ballpark figures for early planning only. Get trade quotes before committing a budget.
+   547→          </p>
+   548→        </div>
+   549→      </SheetContent>
+   550→
+   551→      {/* hidden full-fidelity plan for PNG rendering (offscreen) */}
+   552→      <div className="pointer-events-none fixed -left-[9999px] top-0" aria-hidden>
+   553→        <PlanSVG
+   554→          refCb={(el) => { pngSvgRef.current = el }}
+   555→          room={room}
+   556→          items={items}
+   557→          brand={brand}
+   558→          showFire={showFire}
+   559→          detailed
+   560→          palette={planPalette}
+   561→          zones={zones}
+   562→          showZones={showZones}
+   563→        />
+   564→      </div>
+   565→    </Sheet>
+   566→  )
+   567→}
+   568→
+   569→/** tiny local button so the sheet stays dependency-light */
+   570→function Button2({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) {
+   571→  return (
+   572→    <button
+   573→      onClick={onClick}
+   574→      disabled={disabled}
+   575→      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-stone-300/80 bg-white px-2.5 text-[11px] font-semibold text-charcoal shadow-xs transition-colors hover:border-stone-400 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
+   576→    >
+   577→      {children}
+   578→    </button>
+   579→  )
+   580→}
+   581→
