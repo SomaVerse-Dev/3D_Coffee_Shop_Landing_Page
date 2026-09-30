@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { BadgeDollarSign, ChevronDown, ChevronUp, Copy, RotateCw, Trash2, MousePointerClick } from 'lucide-react'
+import { BadgeDollarSign, ChevronDown, ChevronUp, Copy, Palette, RotateCw, Trash2, MousePointerClick } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -16,11 +16,11 @@ export function HintChip() {
   const selectedUid = usePlanner((s) => s.selectedUid)
   let text = 'Pick furniture from the library, then click the floor to place it.'
   if (armedId) text = 'Click the floor to place · Esc to cancel'
-  else if (selectedUid) text = 'Drag to move · R rotate · D duplicate · right-click for actions'
+  else if (selectedUid) text = 'Drag to move · arrows nudge · R rotate · D duplicate · right-click for actions'
   return (
     <div className="chip-glass pointer-events-none flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[11px] font-medium text-stone-600">
-      <MousePointerClick className="h-3.5 w-3.5 text-stone-400" />
-      {text}
+      <MousePointerClick className="h-3.5 w-3.5 shrink-0 text-stone-400" />
+      <span className="truncate">{text}</span>
     </div>
   )
 }
@@ -152,6 +152,8 @@ export function PlanMinimap() {
   const selectedUid = usePlanner((s) => s.selectedUid)
   const planOpen = usePlanner((s) => s.planOpen)
   const setPlanOpen = usePlanner((s) => s.setPlanOpen)
+  const planPalette = usePlanner((s) => s.planPalette)
+  const setPlanPalette = usePlanner((s) => s.setPlanPalette)
 
   return (
     <div className="card-glass pointer-events-auto hidden w-60 overflow-hidden rounded-xl md:block">
@@ -174,15 +176,42 @@ export function PlanMinimap() {
             brand={brand}
             showFire={showFire}
             selectedUid={selectedUid}
+            palette={planPalette}
             className="block h-auto w-full"
           />
         </div>
-        <div className="mt-2 flex items-center justify-between text-[10px] font-medium tabular-nums text-stone-400">
-          <span>{items.length} items placed</span>
-          <span className="inline-flex items-center gap-1">
-            <span className="h-1 w-1 rounded-full bg-emerald-500" aria-hidden />
-            live plan
-          </span>
+        <div className="mt-2 space-y-1.5">
+          <div className="flex items-center justify-between text-[10px] font-medium tabular-nums text-stone-400">
+            <span>{items.length} items placed</span>
+            <span className="inline-flex items-center gap-1">
+              <span className="h-1 w-1 rounded-full bg-emerald-500" aria-hidden />
+              live plan
+            </span>
+          </div>
+          {/* glyph palette: brand color vs one color per category */}
+          <div
+            role="group"
+            aria-label="Plan glyph colors"
+            className="flex items-center gap-0.5 rounded-lg border border-stone-200/90 bg-white/70 p-0.5"
+          >
+            <Palette className="mx-1.5 h-3 w-3 shrink-0 text-stone-400" aria-hidden />
+            {([['brand', 'Brand colors'], ['category', 'By category']] as const).map(([mode, label]) => (
+              <button
+                key={mode}
+                onClick={() => setPlanPalette(mode)}
+                aria-pressed={planPalette === mode}
+                title={mode === 'brand' ? 'Color plan glyphs with the brand color' : 'Color plan glyphs by furniture category'}
+                className={cn(
+                  'flex-1 rounded-md px-1.5 py-1 text-[9.5px] font-semibold uppercase tracking-wide transition-colors',
+                  planPalette === mode
+                    ? 'bg-charcoal text-warmwhite shadow-xs'
+                    : 'text-stone-400 hover:bg-stone-100 hover:text-charcoal',
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </div>

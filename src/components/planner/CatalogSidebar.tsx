@@ -7,7 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { CATALOG, CATEGORY_META, getItem } from '@/lib/planner/catalog'
 import type { Category } from '@/lib/planner/types'
 import { usePlanner } from '@/lib/planner/store'
-import { fmtMoney } from '@/lib/planner/capacity'
+import { CATEGORY_COLORS, fmtMoney } from '@/lib/planner/capacity'
 import { cn } from '@/lib/utils'
 
 /** tiny plan-symbol glyph per item, drawn from its footprint */
@@ -92,6 +92,16 @@ export default function CatalogSidebar({ onPlaced }: { onPlaced?: () => void }) 
                   : 'border-stone-200 bg-white text-stone-600 shadow-xs hover:border-stone-300 hover:bg-stone-50 hover:text-charcoal',
               )}
             >
+              {k !== 'all' && (
+                <span
+                  className={cn(
+                    'mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle',
+                    cat === k && 'ring-1 ring-warmwhite/50',
+                  )}
+                  style={{ backgroundColor: CATEGORY_COLORS[k] }}
+                  aria-hidden
+                />
+              )}
               {CATEGORY_META[k].label}
             </button>
           ))}

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { PlacedItem, RoomSpec, TemplateId, ViewMode } from './types'
+import type { Category, PlacedItem, RoomSpec, TemplateId, ViewMode } from './types'
 import { makeUid } from './types'
 import { getItem, halfExtents } from './catalog'
 import { TEMPLATES } from './templates'
@@ -48,6 +48,9 @@ export interface SessionCheckpoint {
   cost: number
 }
 
+/** How plan glyphs are colored: brand color everywhere, or one color per furniture category. */
+export type PlanPalette = 'brand' | 'category'
+
 interface PlannerState {
   room: RoomSpec
   items: PlacedItem[]
@@ -62,6 +65,10 @@ interface PlannerState {
   templateId: TemplateId | 'custom'
   /** optional fit-out budget in USD (device-local preference, not part of layout snapshots) */
   budget: number | null
+  /** per-category spending caps in USD (device-local preference, category → cap) */
+  categoryBudgets: Partial<Record<Category, number>>
+  /** plan-glyph coloring mode (device-local preference) */
+  planPalette: PlanPalette
   /** named session checkpoints (device-local, restored from the History popover) */
   checkpoints: SessionCheckpoint[]
   /** mirrors of the module-level history lengths so the UI can react */
@@ -93,6 +100,10 @@ interface PlannerState {
   setProjectName: (name: string) => void
   /** set the fit-out budget in USD (null clears it) */
   setBudget: (usd: number | null) => void
+  /** set a spending cap for one category in USD (null removes the cap) */
+  setCategoryBudget: (cat: Category, usd: number | null) => void
+  /** switch plan-glyph coloring between brand color and per-category colors */
+  setPlanPalette: (p: PlanPalette) => void
   /** capture a named checkpoint of the current session (max 12, newest first) */
   saveCheckpoint: (label?: string) => SessionCheckpoint
   /** remove one checkpoint by id */
@@ -157,6 +168,8 @@ export const usePlanner = create<PlannerState>()(
       projectName: TEMPLATES.cafe.projectName,
       templateId: 'cafe',
       budget: null,
+      categoryBudgets: {},
+      planPalette: 'brand',
       checkpoints: [],
       undoDepth: 0,
       redoDepth: 0,
@@ -287,6 +300,16 @@ export const usePlanner = create<PlannerState>()(
           budget: usd === null ? null : Math.max(0, Math.min(2_000_000, Math.round(usd))),
         }),
 
+      setCategoryBudget: (cat, usd) =>
+        set((s) => {
+          const next = { ...s.categoryBudgets }
+          if (usd === null) delete next[cat]
+          else next[cat] = Math.max(0, Math.min(2_000_000, Math.round(usd)))
+          return { categoryBudgets: next }
+        }),
+
+      setPlanPalette: (p) => set({ planPalette: p }),
+
       saveCheckpoint: (label) => {
         const s = get()
         const snap = snapshotOf(s)
@@ -396,6 +419,8 @@ export const usePlanner = create<PlannerState>()(
         projectName: s.projectName,
         templateId: s.templateId,
         budget: s.budget,
+        categoryBudgets: s.categoryBudgets,
+        planPalette: s.planPalette,
         checkpoints: s.checkpoints,
       }),
     },

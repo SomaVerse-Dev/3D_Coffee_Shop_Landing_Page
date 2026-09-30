@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import Scene from './Scene'
 import Toolbar from './Toolbar'
@@ -17,6 +17,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/hooks/use-toast'
 import { usePlanner } from '@/lib/planner/store'
+import { getItem } from '@/lib/planner/catalog'
 import { decodeLayout } from '@/lib/planner/share'
 import { TEMPLATES, TEMPLATE_ORDER } from '@/lib/planner/templates'
 
@@ -45,7 +46,11 @@ export default function PlannerWorkspace() {
   const duplicateItem = usePlanner((s) => s.duplicateItem)
   const requestZoom = usePlanner((s) => s.requestZoom)
   const setViewMode = usePlanner((s) => s.setViewMode)
+  const moveItem = usePlanner((s) => s.moveItem)
+  const items = usePlanner((s) => s.items)
   const { toast } = useToast()
+  const [announce, setAnnounce] = useState('')
+  const announceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // rehydrate persisted state after mount (skipHydration is set in the store)
   useEffect(() => {
@@ -69,6 +74,24 @@ export default function PlannerWorkspace() {
     }
     window.history.replaceState(null, '', window.location.pathname)
   }, [])
+
+  // screen-reader announcements (selection + placement)
+  useEffect(() => {
+    if (!selectedUid) return
+    const it = items.find((i) => i.uid === selectedUid)
+    const cat = it ? getItem(it.id) : null
+    if (!it || !cat) return
+    if (announceTimer.current) clearTimeout(announceTimer.current)
+    announceTimer.current = setTimeout(() => {
+      setAnnounce(
+        `${cat.name} selected at ${it.x.toFixed(1)} by ${it.z.toFixed(1)} meters. ` +
+        'Arrow keys nudge, Shift plus arrows for bigger steps, R rotates, D duplicates, Delete removes.',
+      )
+    }, 250)
+    return () => {
+      if (announceTimer.current) clearTimeout(announceTimer.current)
+    }
+  }, [selectedUid, items])
 
   // keyboard shortcuts
   useEffect(() => {
@@ -96,7 +119,17 @@ export default function PlannerWorkspace() {
         e.preventDefault()
         duplicateItem(selectedUid)
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && !mod && selectedUid) {
+        e.preventDefault()
         removeItem(selectedUid)
+      } else if (e.key.startsWith('Arrow') && !mod && selectedUid) {
+        // nudge the selected piece: 5 cm per press, 25 cm with Shift (up = north)
+        e.preventDefault()
+        const it = items.find((i) => i.uid === selectedUid)
+        if (!it) return
+        const step = e.shiftKey ? 0.25 : 0.05
+        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0
+        const dz = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0
+        moveItem(selectedUid, it.x + dx, it.z + dz)
       } else if ((e.key === 'f' || e.key === 'F') && !mod) {
         requestZoom('fit')
       } else if ((e.key === '+' || e.key === '=') && !mod) {
@@ -111,7 +144,7 @@ export default function PlannerWorkspace() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedUid, rotateItem, removeItem, duplicateItem, arm, select, undo, redo, requestZoom, setViewMode])
+  }, [selectedUid, items, rotateItem, removeItem, duplicateItem, moveItem, arm, select, undo, redo, requestZoom, setViewMode])
 
   return (
     <div className="overflow-hidden rounded-2xl border border-stone-300/60 bg-card shadow-[0_24px_60px_-24px_rgba(46,43,38,0.35)]">
@@ -129,8 +162,14 @@ export default function PlannerWorkspace() {
           )}
         </aside>
 
-        {/* viewport */}
-        <div className="blueprint-grid relative min-h-[440px] flex-1 lg:h-[560px]" data-tour="canvas">
+        {/* viewport — focusable so keyboard users land straight on the floor */}
+        <div
+          className="blueprint-grid relative min-h-[440px] flex-1 outline-none focus-visible:ring-2 focus-visible:ring-stone-400/80 focus-visible:ring-inset lg:h-[560px]"
+          data-tour="canvas"
+          tabIndex={0}
+          role="group"
+          aria-label={`Plan editor viewport. ${items.length} pieces placed. Click a piece to select it, then use arrow keys to nudge.`}
+        >
           {!mounted ? (
             <ViewportSkeleton />
           ) : (
@@ -186,6 +225,11 @@ export default function PlannerWorkspace() {
       <ExportModal open={exportOpen} onOpenChange={setExportOpen} />
       <ShortcutsDialog />
       <CoachTour />
+
+      {/* screen-reader live region for selection/placement feedback */}
+      <div aria-live="polite" role="status" className="sr-only">
+        {announce}
+      </div>
     </div>
   )
 }

@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from 'react'
 import {
-  Calculator, Download, ImageDown, Info, Landmark, PenLine, Target, TriangleAlert, Wallet,
+  Calculator, Download, ImageDown, Info, Landmark, PenLine, SlidersHorizontal, Target, TriangleAlert, Wallet,
 } from 'lucide-react'
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
@@ -12,8 +12,10 @@ import { Separator } from '@/components/ui/separator'
 import { usePlanner } from '@/lib/planner/store'
 import { getItem } from '@/lib/planner/catalog'
 import {
-  budgetStatusOf, computeCategoryBreakdown, computeCapacity, computeCost, fmtMoney, VENUES, EXIT_CAPACITY,
+  ALL_CATEGORIES, budgetStatusOf, computeCategoryBreakdown, computeCategorySpend, computeCapacity, computeCost,
+  fmtMoney, VENUES, EXIT_CAPACITY, CATEGORY_META,
 } from '@/lib/planner/capacity'
+import type { Category } from '@/lib/planner/types'
 import { TEMPLATES } from '@/lib/planner/templates'
 import { InsightsCard, ReadinessCard } from './InsightsCards'
 import PlanSVG from './PlanSVG'
@@ -26,6 +28,12 @@ const BUDGET_META = {
   under: { label: 'Under budget', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200', bar: 'bg-emerald-500' },
   close: { label: 'Close to budget', cls: 'bg-amber-100 text-amber-800 border-amber-200', bar: 'bg-amber-500' },
   over: { label: 'Over budget', cls: 'bg-red-100 text-red-700 border-red-200', bar: 'bg-red-500' },
+} as const
+
+const CAP_META = {
+  under: { chip: 'bg-emerald-100 text-emerald-800 border-emerald-200', bar: 'bg-emerald-500/80', icon: '✓' },
+  close: { chip: 'bg-amber-100 text-amber-800 border-amber-200', bar: 'bg-amber-500', icon: '!' },
+  over: { chip: 'bg-red-100 text-red-700 border-red-200', bar: 'bg-red-500', icon: '▲' },
 } as const
 
 /** Build and download a bill-of-materials CSV for the current layout. */
@@ -79,13 +87,18 @@ export default function CostPanel() {
   const projectName = usePlanner((s) => s.projectName)
   const budget = usePlanner((s) => s.budget)
   const setBudget = usePlanner((s) => s.setBudget)
+  const categoryBudgets = usePlanner((s) => s.categoryBudgets)
+  const setCategoryBudget = usePlanner((s) => s.setCategoryBudget)
+  const planPalette = usePlanner((s) => s.planPalette)
   const { toast } = useToast()
 
   const [budgetDraft, setBudgetDraft] = useState('')
+  const [capDrafts, setCapDrafts] = useState<Partial<Record<Category, string>>>({})
   const [pngBusy, setPngBusy] = useState(false)
   const cost = computeCost(items)
   const hasCustom = cost.lines.some((l) => (l as { custom?: boolean }).custom)
   const slices = useMemo(() => computeCategoryBreakdown(items), [items])
+  const catSpend = useMemo(() => computeCategorySpend(items), [items])
   const pngSvgRef = useRef<SVGSVGElement | null>(null)
 
   /** Render the hidden plan SVG into a 2× canvas and download it as a PNG sheet. */
@@ -160,6 +173,21 @@ export default function CostPanel() {
     setBudget(raw.trim() === '' || Number.isNaN(n) || n <= 0 ? null : n)
   }
 
+  function commitCap(cat: Category, raw: string) {
+    const n = Number(raw.replace(/[^0-9]/g, ''))
+    setCategoryBudget(cat, raw.trim() === '' || Number.isNaN(n) || n <= 0 ? null : n)
+    setCapDrafts((d) => {
+      const next = { ...d }
+      delete next[cat]
+      return next
+    })
+  }
+
+  // caps summary: how many categories have caps and how they are doing
+  const cappedCats = ALL_CATEGORIES.filter((c) => categoryBudgets[c] !== undefined)
+  const overCaps = cappedCats.filter((c) => budgetStatusOf(catSpend[c], categoryBudgets[c]!).status === 'over')
+  const closeCaps = cappedCats.filter((c) => budgetStatusOf(catSpend[c], categoryBudgets[c]!).status === 'close')
+
   return (
     <Sheet open={costOpen} onOpenChange={setCostOpen}>
       <SheetContent side="right" className="flex w-[380px] max-w-[92vw] flex-col gap-0 border-stone-200 bg-warmwhite p-0 sm:max-w-[380px]">
@@ -174,7 +202,9 @@ export default function CostPanel() {
         </SheetHeader>
 
         <ScrollArea className="min-h-0 flex-1">
-          <div className="px-5 py-4">
+          {/* grid track with minmax(0,1fr): keeps nowrap "truncate" rows from
+              inflating the scroll-area's table layout beyond the panel width */}
+          <div className="grid grid-cols-[minmax(0,1fr)] px-5 py-4">
             {/* ── budget guardrail ─────────────────────────────────── */}
             <section
               aria-label="Budget guardrail"
@@ -265,6 +295,110 @@ export default function CostPanel() {
                   </div>
                 </div>
               )}
+            </section>
+
+            {/* ── category caps ─────────────────────────────────────── */}
+            <section
+              aria-label="Category caps"
+              className={cn(
+                'mt-4 rounded-xl border bg-white/80 p-3.5 shadow-xs transition-colors',
+                overCaps.length > 0 ? 'border-red-300/80' : 'border-stone-200/80',
+              )}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+                  <SlidersHorizontal className="h-3.5 w-3.5" style={{ color: brand }} />
+                  Category caps
+                </p>
+                {cappedCats.length > 0 && (
+                  overCaps.length > 0 ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
+                      <TriangleAlert className="h-3 w-3" aria-hidden />
+                      {overCaps.length} over
+                    </span>
+                  ) : closeCaps.length > 0 ? (
+                    <span className="rounded-full border border-amber-200 bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                      {closeCaps.length} close
+                    </span>
+                  ) : (
+                    <span className="rounded-full border border-emerald-200 bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">
+                      on track
+                    </span>
+                  )
+                )}
+              </div>
+              <ul className="mt-2.5 space-y-1.5">
+                {ALL_CATEGORIES.map((c) => {
+                  const cap = categoryBudgets[c]
+                  const spend = catSpend[c]
+                  const st = cap !== undefined ? budgetStatusOf(spend, cap) : null
+                  const meta = CATEGORY_META[c]
+                  return (
+                    <li key={c}>
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: meta.color }} aria-hidden />
+                        <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-stone-600">{meta.label}</span>
+                        <span className="w-14 shrink-0 text-right text-[11px] font-semibold tabular-nums text-charcoal">
+                          {spend >= 1000 ? `$${(Math.round(spend / 100) / 10).toFixed(1)}k` : fmtMoney(spend)}
+                        </span>
+                        <div className="relative w-[72px] shrink-0">
+                          <span className="pointer-events-none absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-stone-300">$</span>
+                          <input
+                            inputMode="numeric"
+                            value={capDrafts[c] ?? (cap !== undefined ? String(cap) : '')}
+                            onChange={(e) => setCapDrafts((d) => ({ ...d, [c]: e.target.value }))}
+                            onBlur={(e) => commitCap(c, e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                commitCap(c, (e.target as HTMLInputElement).value)
+                                ;(e.target as HTMLInputElement).blur()
+                              }
+                            }}
+                            placeholder="cap"
+                            aria-label={`${meta.label} spending cap in dollars`}
+                            className={cn(
+                              'h-7 w-full rounded-md border bg-white pl-4 pr-1.5 text-[10.5px] font-semibold tabular-nums text-charcoal shadow-xs outline-none transition-colors placeholder:font-normal placeholder:text-stone-300',
+                              st?.status === 'over'
+                                ? 'border-red-300 focus:border-red-400'
+                                : cap !== undefined
+                                  ? 'border-stone-300/90 focus:border-stone-400'
+                                  : 'border-stone-200 focus:border-stone-400',
+                            )}
+                          />
+                        </div>
+                      </div>
+                      {st && cap !== undefined && (
+                        <div className="mt-1 flex items-center gap-1.5 pl-4">
+                          <div
+                            role="progressbar"
+                            aria-valuenow={Math.round(Math.min(100, st.pct * 100))}
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-label={`${meta.label} cap usage`}
+                            className="h-1.5 flex-1 overflow-hidden rounded-full bg-stone-100 shadow-[inset_0_1px_2px_rgba(46,43,38,0.08)]"
+                          >
+                            <div
+                              className={cn('h-full rounded-full transition-[width] duration-500 ease-out', CAP_META[st.status].bar)}
+                              style={{ width: `${Math.min(100, st.pct * 100)}%` }}
+                            />
+                          </div>
+                          <span
+                            className={cn(
+                              'w-11 shrink-0 text-right text-[9.5px] font-semibold tabular-nums',
+                              st.status === 'over' ? 'text-red-600' : st.status === 'close' ? 'text-amber-700' : 'text-emerald-700',
+                            )}
+                          >
+                            {Math.round(st.pct * 100)}%
+                          </span>
+                        </div>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+              <p className="mt-2 text-[10px] leading-snug text-stone-400">
+                Caps stay on this device — they flag overspends per category while you place items.
+              </p>
             </section>
 
             {/* ── readiness checks (compliance) ────────────────────── */}
@@ -406,6 +540,7 @@ export default function CostPanel() {
           brand={brand}
           showFire={showFire}
           detailed
+          palette={planPalette}
         />
       </div>
     </Sheet>

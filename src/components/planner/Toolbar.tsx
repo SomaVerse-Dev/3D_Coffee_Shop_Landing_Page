@@ -13,7 +13,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { useToast } from '@/hooks/use-toast'
 import { usePlanner } from '@/lib/planner/store'
 import { TEMPLATES, TEMPLATE_ORDER } from '@/lib/planner/templates'
-import { budgetStatusOf, computeCost } from '@/lib/planner/capacity'
+import { budgetStatusOf, computeCategorySpend, computeCost } from '@/lib/planner/capacity'
 import { BRAND_PRESETS, computedBrandName } from '@/lib/planner/brandNames'
 import { buildShareUrl } from '@/lib/planner/share'
 import { cn } from '@/lib/utils'
@@ -46,10 +46,17 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
   const redo = usePlanner((s) => s.redo)
   const getSnapshot = usePlanner((s) => s.getSnapshot)
   const budget = usePlanner((s) => s.budget)
+  const categoryBudgets = usePlanner((s) => s.categoryBudgets)
   const { toast } = useToast()
 
   const cost = computeCost(items)
   const budgetState = budget !== null ? budgetStatusOf(cost.total, budget) : null
+  // category-cap overspends also tint the pill (only when the total budget isn't already red)
+  const catSpend = computeCategorySpend(items)
+  const overCapLabels = Object.entries(categoryBudgets)
+    .filter(([c, cap]) => (catSpend[c as keyof typeof catSpend] ?? 0) > cap)
+    .map(([c]) => c)
+  const capAlert = budgetState?.status !== 'over' && overCapLabels.length > 0
 
   function handleShare() {
     const url = buildShareUrl(getSnapshot())
@@ -334,20 +341,30 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
           <Button
             variant="outline"
             onClick={() => setCostOpen(true)}
-            aria-label={budgetState?.status === 'over' ? `Open cost estimate — ${compactMoney(cost.total)}, over budget` : 'Open cost estimate'}
-            title={budgetState ? `Budget: ${budgetState.status === 'over' ? 'over' : 'under'} — open the estimate` : 'Open cost estimate'}
+            aria-label={budgetState?.status === 'over' ? `Open cost estimate — ${compactMoney(cost.total)}, over budget` : capAlert ? `Open cost estimate — a category cap is exceeded` : 'Open cost estimate'}
+            title={
+              budgetState?.status === 'over'
+                ? 'Budget exceeded — open the estimate'
+                : capAlert
+                  ? `Over cap: ${overCapLabels.join(', ')} — open the estimate`
+                  : budgetState
+                    ? `Budget: ${budgetState.status === 'over' ? 'over' : 'under'} — open the estimate`
+                    : 'Open cost estimate'
+            }
             data-tour="cost"
             className={cn(
               'h-9 gap-1.5 rounded-full border bg-white pl-3 pr-3.5 text-xs font-medium shadow-xs transition-colors hover:bg-white',
               budgetState?.status === 'over'
                 ? 'border-red-300 bg-red-50/70 hover:border-red-400'
-                : budgetState?.status === 'close'
+                : budgetState?.status === 'close' || capAlert
                   ? 'border-amber-300 bg-amber-50/70 hover:border-amber-400'
                   : 'border-stone-300/80 hover:border-stone-400/70',
             )}
           >
             {budgetState?.status === 'over' ? (
               <TriangleAlert className="h-3.5 w-3.5 text-red-500" />
+            ) : capAlert ? (
+              <TriangleAlert className="h-3.5 w-3.5 text-amber-500" />
             ) : (
               <Calculator className="h-3.5 w-3.5 text-stone-400" />
             )}

@@ -17,6 +17,8 @@ const SHORTCUTS: Array<{ group: string; rows: ShortcutRow[] }> = [
   {
     group: 'Items',
     rows: [
+      { keys: ['↑↓←→'], action: 'Nudge the selected piece 5 cm' },
+      { keys: ['⇧', '↑↓←→'], action: 'Nudge in bigger 25 cm steps' },
       { keys: ['R'], action: 'Rotate the selected piece 90°' },
       { keys: ['D'], action: 'Duplicate the selected piece' },
       { keys: ['Del'], action: 'Remove the selected piece' },

@@ -127,6 +127,30 @@ export const CATEGORY_META: Record<Category, { label: string; color: string }> =
 
 const CATEGORY_ORDER: Category[] = ['seating', 'tables', 'counters', 'fixtures', 'decor']
 
+/** every category in display order (caps card renders all five, even at $0) */
+export const ALL_CATEGORIES: Category[] = CATEGORY_ORDER
+
+/** category colors including the catalog "All" filter chip (transparent dot) */
+export const CATEGORY_COLORS: Record<Category | 'all', string> = {
+  all: 'transparent',
+  seating: CATEGORY_META.seating.color,
+  tables: CATEGORY_META.tables.color,
+  counters: CATEGORY_META.counters.color,
+  fixtures: CATEGORY_META.fixtures.color,
+  decor: CATEGORY_META.decor.color,
+}
+
+/** spend per category across all five (unlike breakdown, keeps $0 categories) */
+export function computeCategorySpend(items: PlacedItem[]): Record<Category, number> {
+  const out = { seating: 0, tables: 0, counters: 0, fixtures: 0, decor: 0 } as Record<Category, number>
+  for (const it of items) {
+    const cat = getItem(it.id)
+    if (!cat) continue
+    out[cat.category] += it.price ?? cat.price
+  }
+  return out
+}
+
 export interface CategorySlice {
   category: Category
   label: string

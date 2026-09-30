@@ -2,6 +2,7 @@
 
 import type { PlacedItem, RoomSpec } from '@/lib/planner/types'
 import { getItem } from '@/lib/planner/catalog'
+import { ALL_CATEGORIES, CATEGORY_META } from '@/lib/planner/capacity'
 
 interface PlanSVGProps {
   room: RoomSpec
@@ -12,6 +13,8 @@ interface PlanSVGProps {
   selectedUid?: string | null
   className?: string
   transparentPaper?: boolean
+  /** glyph coloring: brand color everywhere, or one color per furniture category */
+  palette?: 'brand' | 'category'
   refCb?: (el: SVGSVGElement | null) => void
 }
 
@@ -22,7 +25,7 @@ const PATH_GREEN = '#16A34A'
 
 /** 2D architectural plan, coordinates in meters (SVG user units). */
 export default function PlanSVG({
-  room, items, brand, showFire = false, detailed = false, selectedUid = null, className, transparentPaper = false, refCb,
+  room, items, brand, showFire = false, detailed = false, selectedUid = null, className, transparentPaper = false, palette = 'brand', refCb,
 }: PlanSVGProps) {
   const { w, d } = room
   const pad = detailed ? 1.15 : 0.55
@@ -90,7 +93,15 @@ export default function PlanSVG({
         const cat = getItem(it.id)
         if (!cat) return null
         const deg = (-it.rot * 180) / Math.PI
-        const brandFill = cat.brandable ? brand : cat.shape === 'counter' ? INK : '#E7DFC9'
+        const catColor = CATEGORY_META[cat.category].color
+        const brandFill =
+          palette === 'category'
+            ? catColor
+            : cat.brandable
+              ? brand
+              : cat.shape === 'counter'
+                ? INK
+                : '#E7DFC9'
         const stroke = selectedUid === it.uid ? brand : INK
         const sw = selectedUid === it.uid ? 0.07 : 0.032
         return (
@@ -179,6 +190,25 @@ export default function PlanSVG({
             <text x={2} y={-0.18} textAnchor="middle" fontSize={0.22} fill={INK}
               style={{ fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}>2 m</text>
           </g>
+          {/* category legend (palette mode) — sits right of the scale bar on the bottom margin */
+          }
+          {palette === 'category' && (
+            <g transform={`translate(${-w / 2 + 2.55} ${d / 2 + 0.62})`}>
+              <text x={0} y={0.075} fontSize={0.21} fill="#8A8375" fontWeight={600}
+                style={{ fontFamily: 'ui-sans-serif, system-ui, sans-serif', letterSpacing: '0.06em' }}>KEY</text>
+              {ALL_CATEGORIES.map((c, i) => {
+                const short = CATEGORY_META[c].label.split(' &')[0].split(' & ')[0]
+                const x = 0.72 + i * 1.45
+                return (
+                  <g key={c} transform={`translate(${x} 0)`}>
+                    <rect x={0} y={-0.085} width={0.2} height={0.2} rx={0.045} fill={CATEGORY_META[c].color} />
+                    <text x={0.28} y={0.075} fontSize={0.21} fill={INK} fontWeight={500}
+                      style={{ fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}>{short}</text>
+                  </g>
+                )
+              })}
+            </g>
+          )}
         </g>
       )}
     </svg>
