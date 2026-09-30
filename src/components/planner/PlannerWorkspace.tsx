@@ -47,6 +47,9 @@ export default function PlannerWorkspace() {
   const requestZoom = usePlanner((s) => s.requestZoom)
   const setViewMode = usePlanner((s) => s.setViewMode)
   const moveItem = usePlanner((s) => s.moveItem)
+  const measureMode = usePlanner((s) => s.measureMode)
+  const setMeasureMode = usePlanner((s) => s.setMeasureMode)
+  const stopMeasure = usePlanner((s) => s.stopMeasure)
   const items = usePlanner((s) => s.items)
   const { toast } = useToast()
   const [announce, setAnnounce] = useState('')
@@ -98,6 +101,11 @@ export default function PlannerWorkspace() {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
+      // a modal dialog / sheet is open (zone editor, cost panel, export…):
+      // item shortcuts must not double-fire underneath it — but undo/redo
+      // (advertised inside the zone editor) and Escape still pass through
+      const dialogOpen = !!document.querySelector('[role="dialog"]')
+      if (dialogOpen && e.key !== 'Escape' && !(e.metaKey || e.ctrlKey)) return
       const mod = e.metaKey || e.ctrlKey
       if (mod && (e.key === 'z' || e.key === 'Z')) {
         e.preventDefault()
@@ -111,6 +119,7 @@ export default function PlannerWorkspace() {
         return
       }
       if (e.key === 'Escape') {
+        stopMeasure()
         arm(null)
         select(null)
       } else if ((e.key === 'r' || e.key === 'R') && !mod && selectedUid) {
@@ -130,6 +139,9 @@ export default function PlannerWorkspace() {
         const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0
         const dz = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0
         moveItem(selectedUid, it.x + dx, it.z + dz)
+      } else if ((e.key === 'm' || e.key === 'M') && !mod) {
+        e.preventDefault()
+        setMeasureMode(!measureMode)
       } else if ((e.key === 'f' || e.key === 'F') && !mod) {
         requestZoom('fit')
       } else if ((e.key === '+' || e.key === '=') && !mod) {
@@ -144,7 +156,7 @@ export default function PlannerWorkspace() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedUid, items, rotateItem, removeItem, duplicateItem, moveItem, arm, select, undo, redo, requestZoom, setViewMode])
+  }, [selectedUid, items, rotateItem, removeItem, duplicateItem, moveItem, arm, select, undo, redo, requestZoom, setViewMode, measureMode, setMeasureMode, stopMeasure])
 
   return (
     <div className="overflow-hidden rounded-2xl border border-stone-300/60 bg-card shadow-[0_24px_60px_-24px_rgba(46,43,38,0.35)]">

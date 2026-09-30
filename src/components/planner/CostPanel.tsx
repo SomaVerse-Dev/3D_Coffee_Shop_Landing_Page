@@ -15,9 +15,9 @@ import {
   ALL_CATEGORIES, budgetStatusOf, computeCategoryBreakdown, computeCategorySpend, computeCapacity, computeCost,
   fmtMoney, VENUES, EXIT_CAPACITY, CATEGORY_META,
 } from '@/lib/planner/capacity'
-import type { Category } from '@/lib/planner/types'
+import type { Category, PlacedItem } from '@/lib/planner/types'
 import { TEMPLATES } from '@/lib/planner/templates'
-import { ZONE_META, computeZoneStats } from '@/lib/planner/zones'
+import { ZONE_META, computeZoneStats, itemsInZone } from '@/lib/planner/zones'
 import { openZoneEditor } from '@/lib/planner/events'
 import { InsightsCard, ReadinessCard } from './InsightsCards'
 import PlanSVG from './PlanSVG'
@@ -38,6 +38,84 @@ const CAP_META = {
   over: { chip: 'bg-red-100 text-red-700 border-red-200', bar: 'bg-red-500', icon: '▲' },
 } as const
 
+/** CSV string escaping: quote when the value contains commas, quotes or newlines */
+function csvEsc(v: string | number): string {
+  const s = String(v)
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
+/** URL-safe filename slug */
+function slugify(v: string, fallback: string): string {
+  return v.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || fallback
+}
+
+/** create a Blob CSV and click an anchor to download it */
+function triggerCsvDownload(csv: string, filename: string) {
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 4000)
+}
+
+interface BomScope {
+  /** zone label, e.g. "Espresso bar" */
+  label: string
+  /** zone kind, e.g. "service" */
+  kind: string
+  /** clipped zone area in m² */
+  areaM2: number
+  /** seats inside the zone */
+  seats: number
+}
+
+/** Build the bill-of-materials CSV for the layout (or a single zone when `scope` is set). */
+function buildBomCsv(
+  projectName: string, templateId: string, areaM2: number, seats: number,
+  lines: Array<{ name: string; qty: number; unit: number; total: number; custom?: boolean }>,
+  subtotal: number, install: number, contingency: number, total: number, budget: number | null,
+  caps: Array<{ label: string; cap: number; spend: number; status: 'under' | 'close' | 'over' }>,
+  scope?: BomScope,
+): string {
+  const rows: string[] = []
+  rows.push(scope ? `FORMA — Zone bill of materials` : 'FORMA — Bill of materials')
+  rows.push(`Project,${csvEsc(projectName || 'Untitled layout')}`)
+  rows.push(`Template,${csvEsc(templateId === 'custom' ? 'Custom layout' : TEMPLATES[templateId as 'cafe']?.name ?? templateId)}`)
+  if (scope) {
+    rows.push(`Scope,${csvEsc(`Zone — ${scope.label} (${scope.kind})`)}`)
+    rows.push(`Zone area,${scope.areaM2.toFixed(1)} m2`)
+    rows.push(`Zone seats,${scope.seats}`)
+  } else {
+    rows.push(`Floor area,${areaM2.toFixed(1)} m2`)
+    rows.push(`Seats,${seats}`)
+  }
+  rows.push(`Exported,${new Date().toISOString().slice(0, 10)}`)
+  rows.push('')
+  rows.push('Item,Qty,Unit price (USD),Line total (USD),Pricing')
+  for (const l of lines) {
+    rows.push([csvEsc(l.name), l.qty, l.unit, l.total, l.custom ? 'custom' : 'catalog'].join(','))
+  }
+  rows.push('')
+  rows.push(`Subtotal,,,${subtotal},`)
+  rows.push(`Delivery & install (12%),,,${install},`)
+  rows.push(`Contingency (8%),,,${contingency},`)
+  rows.push(`Estimated total,,,${total},`)
+  if (!scope && budget !== null) rows.push(`Budget,,,${budget},`)
+  if (!scope && caps.length > 0) {
+    rows.push('')
+    rows.push('Category caps')
+    rows.push('Category,Cap (USD),Spend (USD),Status')
+    for (const c of caps) {
+      rows.push([csvEsc(c.label), c.cap, c.spend, c.status.toUpperCase()].join(','))
+    }
+  }
+  return rows.join('\n')
+}
+
 /** Build and download a bill-of-materials CSV for the current layout. */
 function downloadBomCsv(
   projectName: string, templateId: string, areaM2: number, seats: number,
@@ -45,46 +123,22 @@ function downloadBomCsv(
   subtotal: number, install: number, contingency: number, total: number, budget: number | null,
   caps: Array<{ label: string; cap: number; spend: number; status: 'under' | 'close' | 'over' }>,
 ) {
-  const esc = (v: string | number) => {
-    const s = String(v)
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-  }
-  const rows: string[] = []
-  rows.push('FORMA — Bill of materials')
-  rows.push(`Project,${esc(projectName || 'Untitled layout')}`)
-  rows.push(`Template,${esc(templateId === 'custom' ? 'Custom layout' : TEMPLATES[templateId as 'cafe']?.name ?? templateId)}`)
-  rows.push(`Floor area,${areaM2.toFixed(1)} m2`)
-  rows.push(`Seats,${seats}`)
-  rows.push(`Exported,${new Date().toISOString().slice(0, 10)}`)
-  rows.push('')
-  rows.push('Item,Qty,Unit price (USD),Line total (USD),Pricing')
-  for (const l of lines) {
-    rows.push([esc(l.name), l.qty, l.unit, l.total, l.custom ? 'custom' : 'catalog'].join(','))
-  }
-  rows.push('')
-  rows.push(`Subtotal,,,${subtotal},`)
-  rows.push(`Delivery & install (12%),,,${install},`)
-  rows.push(`Contingency (8%),,,${contingency},`)
-  rows.push(`Estimated total,,,${total},`)
-  if (budget !== null) rows.push(`Budget,,,${budget},`)
-  if (caps.length > 0) {
-    rows.push('')
-    rows.push('Category caps')
-    rows.push('Category,Cap (USD),Spend (USD),Status')
-    for (const c of caps) {
-      rows.push([esc(c.label), c.cap, c.spend, c.status.toUpperCase()].join(','))
-    }
-  }
-  const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  const slug = (projectName || 'layout').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'layout'
-  a.href = url
-  a.download = `forma-bom-${slug}.csv`
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 4000)
+  const csv = buildBomCsv(projectName, templateId, areaM2, seats, lines, subtotal, install, contingency, total, budget, caps)
+  triggerCsvDownload(csv, `forma-bom-${slugify(projectName, 'layout')}.csv`)
+}
+
+/** Build and download a BOM scoped to one zone. */
+function downloadZoneBomCsv(
+  projectName: string, templateId: string, scope: BomScope,
+  zoneItems: PlacedItem[],
+) {
+  const cost = computeCost(zoneItems)
+  const csv = buildBomCsv(
+    projectName, templateId, scope.areaM2, scope.seats,
+    cost.lines, cost.subtotal, cost.install, cost.contingency, cost.total,
+    null, [], scope,
+  )
+  triggerCsvDownload(csv, `forma-bom-${slugify(projectName, 'layout')}-${slugify(scope.label, 'zone')}.csv`)
 }
 
 export default function CostPanel() {
@@ -584,13 +638,32 @@ function Button2({ children, onClick, disabled }: { children: React.ReactNode; o
   )
 }
 
-/** per-zone area / seats / spend — feeds the "open zone editor" shortcut */
+/** per-zone area / seats / spend — feeds the "open zone editor" shortcut + per-zone BOM export */
 function ZoneBreakdownCard() {
   const zones = usePlanner((s) => s.zones)
   const items = usePlanner((s) => s.items)
   const room = usePlanner((s) => s.room)
   const brand = usePlanner((s) => s.brandColor)
+  const projectName = usePlanner((s) => s.projectName)
+  const templateId = usePlanner((s) => s.templateId)
+  const { toast } = useToast()
   const stats = useMemo(() => computeZoneStats(zones, items, room), [zones, items, room])
+
+  const handleZoneCsv = (zoneLabel: string, zoneKind: string, area: number, seats: number, zoneId: string) => {
+    const zn = zones.find((z) => z.id === zoneId)
+    if (!zn) return
+    const zoneItems = itemsInZone(zn, items, room)
+    if (zoneItems.length === 0) {
+      toast({ title: 'That zone is empty', description: `No furniture sits inside “${zoneLabel}” yet, so there is nothing to export.` })
+      return
+    }
+    downloadZoneBomCsv(
+      projectName, templateId,
+      { label: zoneLabel, kind: zoneKind, areaM2: area, seats },
+      zoneItems,
+    )
+    toast({ title: 'Zone BOM saved', description: `${zoneItems.length} ${zoneItems.length === 1 ? 'piece' : 'pieces'} from “${zoneLabel}” exported as CSV.` })
+  }
 
   if (zones.length === 0) {
     return (
@@ -635,7 +708,7 @@ function ZoneBreakdownCard() {
         {stats.map(({ zone, area, seats, spend, pieces, pctOfFloor }) => {
           const color = ZONE_META[zone.kind].color
           return (
-            <li key={zone.id}>
+            <li key={zone.id} className="group/zone">
               <div className="flex items-center gap-2">
                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} aria-hidden />
                 <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-charcoal">{zone.label}</span>
@@ -650,6 +723,18 @@ function ZoneBreakdownCard() {
                 <span className="w-14 shrink-0 text-right text-[11px] font-semibold tabular-nums text-charcoal">
                   {spend >= 1000 ? `$${(Math.round(spend / 100) / 10).toFixed(1)}k` : fmtMoney(spend)}
                 </span>
+                <button
+                  type="button"
+                  onClick={() => handleZoneCsv(zone.label, zone.kind, area, seats, zone.id)}
+                  className={cn(
+                    'h-6 w-6 shrink-0 rounded-md text-stone-300 transition-colors',
+                    'opacity-0 hover:bg-stone-100 hover:text-charcoal focus-visible:opacity-100 group-hover/zone:opacity-100',
+                  )}
+                  title={`Download a BOM for “${zone.label}” (CSV)`}
+                  aria-label={`Download bill of materials for ${zone.label}`}
+                >
+                  <Download className="mx-auto h-3 w-3" aria-hidden />
+                </button>
               </div>
               <div className="mt-1 flex items-center gap-1.5 pl-4">
                 <div
@@ -674,7 +759,7 @@ function ZoneBreakdownCard() {
         })}
       </ul>
       <p className="mt-2 text-[10px] leading-snug text-stone-400">
-        An item counts toward a zone when its center falls inside; zones may overlap, so shares can sum past 100%.
+        An item counts toward a zone when its center falls inside; hover a row to download that zone's BOM.
       </p>
     </section>
   )

@@ -43,6 +43,10 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
   const toggleZones = usePlanner((s) => s.toggleZones)
   const zonesCount = usePlanner((s) => s.zones.length)
   const [zoneEditorOpen, setZoneEditorOpen] = useState(false)
+  const measureMode = usePlanner((s) => s.measureMode)
+  const measureA = usePlanner((s) => s.measureA)
+  const measureB = usePlanner((s) => s.measureB)
+  const setMeasureMode = usePlanner((s) => s.setMeasureMode)
   const brandColor = usePlanner((s) => s.brandColor)
   const setBrandColor = usePlanner((s) => s.setBrandColor)
   const items = usePlanner((s) => s.items)
@@ -200,6 +204,38 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
           <span className="hidden text-xs font-medium text-stone-600 2xl:inline">Fire safety</span>
           <Switch checked={showFire} onCheckedChange={toggleFire} aria-label="Show fire safety egress" />
         </label>
+
+        {/* measure tool */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => setMeasureMode(!measureMode)}
+              aria-pressed={measureMode}
+              aria-label={measureMode ? 'Exit measure tool' : 'Measure distances on the floor'}
+              title={measureMode ? 'Exit measure tool (Esc)' : 'Measure distances (M)'}
+              className={cn(
+                'flex h-9 items-center gap-1.5 rounded-lg border px-2.5 shadow-xs transition-all duration-150',
+                measureMode
+                  ? 'border-charcoal/30 bg-charcoal/[0.06] text-charcoal'
+                  : 'border-stone-300/80 bg-white text-stone-400 hover:border-stone-400/70 hover:text-charcoal',
+              )}
+            >
+              <Ruler className={cn('h-4 w-4 transition-colors', measureMode && 'text-charcoal')} />
+              {measureMode && measureA && measureB && (
+                <span className="hidden text-[10px] font-bold tabular-nums text-charcoal 2xl:inline">
+                  {Math.hypot(measureB.x - measureA.x, measureB.z - measureA.z).toFixed(2)}
+                </span>
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">
+            {measureMode
+              ? measureA && measureB
+                ? 'Measured — click again to re-measure, Esc to exit'
+                : 'Click two points on the floor'
+              : 'Measure distances on the floor (M)'}
+          </TooltipContent>
+        </Tooltip>
 
         {/* functional zones */}
         <Tooltip>

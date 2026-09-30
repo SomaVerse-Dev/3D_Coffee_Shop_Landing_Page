@@ -30,10 +30,18 @@ const SHORTCUTS: Array<{ group: string; rows: ShortcutRow[] }> = [
     rows: [
       { keys: ['1'], action: 'Swing to top-down plan' },
       { keys: ['2'], action: 'Swing to 3D perspective' },
+      { keys: ['M'], action: 'Measure distances on the floor' },
       { keys: ['F'], action: 'Re-frame the whole room' },
       { keys: ['+'], action: 'Zoom in' },
       { keys: ['−'], action: 'Zoom out' },
-      { keys: ['Esc'], action: 'Cancel placement / deselect' },
+      { keys: ['Esc'], action: 'Cancel placement / measuring / deselect' },
+    ],
+  },
+  {
+    group: 'Zones',
+    rows: [
+      { keys: ['↑↓←→'], action: 'Nudge the selected zone 10 cm (zone editor)' },
+      { keys: ['⇧', '↑↓←→'], action: 'Nudge the zone in 50 cm steps' },
     ],
   },
   {

@@ -1,0 +1,682 @@
+     1→'use client'
+     2→
+     3→import { useMemo, useRef, useState } from 'react'
+     4→import {
+     5→  Calculator, Download, ImageDown, Info, Landmark, LayoutGrid, PenLine, SlidersHorizontal, Target, TriangleAlert, Wallet,
+     6→} from 'lucide-react'
+     7→import {
+     8→  Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
+     9→} from '@/components/ui/sheet'
+    10→import { ScrollArea } from '@/components/ui/scroll-area'
+    11→import { Separator } from '@/components/ui/separator'
+    12→import { usePlanner } from '@/lib/planner/store'
+    13→import { getItem } from '@/lib/planner/catalog'
+    14→import {
+    15→  ALL_CATEGORIES, budgetStatusOf, computeCategoryBreakdown, computeCategorySpend, computeCapacity, computeCost,
+    16→  fmtMoney, VENUES, EXIT_CAPACITY, CATEGORY_META,
+    17→} from '@/lib/planner/capacity'
+    18→import type { Category } from '@/lib/planner/types'
+    19→import { TEMPLATES } from '@/lib/planner/templates'
+    20→import { ZONE_META, computeZoneStats } from '@/lib/planner/zones'
+    21→import { openZoneEditor } from '@/lib/planner/events'
+    22→import { InsightsCard, ReadinessCard } from './InsightsCards'
+    23→import PlanSVG from './PlanSVG'
+    24→import { useToast } from '@/hooks/use-toast'
+    25→import { cn } from '@/lib/utils'
+    26→
+    27→const BUDGET_PRESETS = [15_000, 25_000, 40_000, 60_000]
+    28→
+    29→const BUDGET_META = {
+    30→  under: { label: 'Under budget', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200', bar: 'bg-emerald-500' },
+    31→  close: { label: 'Close to budget', cls: 'bg-amber-100 text-amber-800 border-amber-200', bar: 'bg-amber-500' },
+    32→  over: { label: 'Over budget', cls: 'bg-red-100 text-red-700 border-red-200', bar: 'bg-red-500' },
+    33→} as const
+    34→
+    35→const CAP_META = {
+    36→  under: { chip: 'bg-emerald-100 text-emerald-800 border-emerald-200', bar: 'bg-emerald-500/80', icon: '✓' },
+    37→  close: { chip: 'bg-amber-100 text-amber-800 border-amber-200', bar: 'bg-amber-500', icon: '!' },
+    38→  over: { chip: 'bg-red-100 text-red-700 border-red-200', bar: 'bg-red-500', icon: '▲' },
+    39→} as const
+    40→
+    41→/** Build and download a bill-of-materials CSV for the current layout. */
+    42→function downloadBomCsv(
+    43→  projectName: string, templateId: string, areaM2: number, seats: number,
+    44→  lines: Array<{ name: string; qty: number; unit: number; total: number; custom?: boolean }>,
+    45→  subtotal: number, install: number, contingency: number, total: number, budget: number | null,
+    46→  caps: Array<{ label: string; cap: number; spend: number; status: 'under' | 'close' | 'over' }>,
+    47→) {
+    48→  const esc = (v: string | number) => {
+    49→    const s = String(v)
+    50→    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    51→  }
+    52→  const rows: string[] = []
+    53→  rows.push('FORMA — Bill of materials')
+    54→  rows.push(`Project,${esc(projectName || 'Untitled layout')}`)
+    55→  rows.push(`Template,${esc(templateId === 'custom' ? 'Custom layout' : TEMPLATES[templateId as 'cafe']?.name ?? templateId)}`)
+    56→  rows.push(`Floor area,${areaM2.toFixed(1)} m2`)
+    57→  rows.push(`Seats,${seats}`)
+    58→  rows.push(`Exported,${new Date().toISOString().slice(0, 10)}`)
+    59→  rows.push('')
+    60→  rows.push('Item,Qty,Unit price (USD),Line total (USD),Pricing')
+    61→  for (const l of lines) {
+    62→    rows.push([esc(l.name), l.qty, l.unit, l.total, l.custom ? 'custom' : 'catalog'].join(','))
+    63→  }
+    64→  rows.push('')
+    65→  rows.push(`Subtotal,,,${subtotal},`)
+    66→  rows.push(`Delivery & install (12%),,,${install},`)
+    67→  rows.push(`Contingency (8%),,,${contingency},`)
+    68→  rows.push(`Estimated total,,,${total},`)
+    69→  if (budget !== null) rows.push(`Budget,,,${budget},`)
+    70→  if (caps.length > 0) {
+    71→    rows.push('')
+    72→    rows.push('Category caps')
+    73→    rows.push('Category,Cap (USD),Spend (USD),Status')
+    74→    for (const c of caps) {
+    75→      rows.push([esc(c.label), c.cap, c.spend, c.status.toUpperCase()].join(','))
+    76→    }
+    77→  }
+    78→  const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' })
+    79→  const url = URL.createObjectURL(blob)
+    80→  const a = document.createElement('a')
+    81→  const slug = (projectName || 'layout').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'layout'
+    82→  a.href = url
+    83→  a.download = `forma-bom-${slug}.csv`
+    84→  document.body.appendChild(a)
+    85→  a.click()
+    86→  a.remove()
+    87→  setTimeout(() => URL.revokeObjectURL(url), 4000)
+    88→}
+    89→
+    90→export default function CostPanel() {
+    91→  const costOpen = usePlanner((s) => s.costOpen)
+    92→  const setCostOpen = usePlanner((s) => s.setCostOpen)
+    93→  const items = usePlanner((s) => s.items)
+    94→  const room = usePlanner((s) => s.room)
+    95→  const brand = usePlanner((s) => s.brandColor)
+    96→  const showFire = usePlanner((s) => s.showFire)
+    97→  const zones = usePlanner((s) => s.zones)
+    98→  const showZones = usePlanner((s) => s.showZones)
+    99→  const templateId = usePlanner((s) => s.templateId)
+   100→  const projectName = usePlanner((s) => s.projectName)
+   101→  const budget = usePlanner((s) => s.budget)
+   102→  const setBudget = usePlanner((s) => s.setBudget)
+   103→  const categoryBudgets = usePlanner((s) => s.categoryBudgets)
+   104→  const setCategoryBudget = usePlanner((s) => s.setCategoryBudget)
+   105→  const planPalette = usePlanner((s) => s.planPalette)
+   106→  const { toast } = useToast()
+   107→
+   108→  const [budgetDraft, setBudgetDraft] = useState('')
+   109→  const [capDrafts, setCapDrafts] = useState<Partial<Record<Category, string>>>({})
+   110→  const [pngBusy, setPngBusy] = useState(false)
+   111→  const cost = computeCost(items)
+   112→  const hasCustom = cost.lines.some((l) => (l as { custom?: boolean }).custom)
+   113→  const slices = useMemo(() => computeCategoryBreakdown(items), [items])
+   114→  const catSpend = useMemo(() => computeCategorySpend(items), [items])
+   115→  const pngSvgRef = useRef<SVGSVGElement | null>(null)
+   116→
+   117→  /** Render the hidden plan SVG into a 2× canvas and download it as a PNG sheet. */
+   118→  async function downloadPlanPng() {
+   119→    if (!pngSvgRef.current || pngBusy) return
+   120→    setPngBusy(true)
+   121→    try {
+   122→      const svg = pngSvgRef.current
+   123→      const xml = new XMLSerializer().serializeToString(svg)
+   124→      const img = new Image()
+   125→      const svgUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml)
+   126→      await new Promise<void>((resolve, reject) => {
+   127→        img.onload = () => resolve()
+   128→        img.onerror = () => reject(new Error('SVG render failed'))
+   129→        img.src = svgUrl
+   130→      })
+   131→      const scale = 2
+   132→      const W = img.width * scale
+   133→      const H = img.height * scale + 96
+   134→      const canvas = document.createElement('canvas')
+   135→      canvas.width = W
+   136→      canvas.height = H
+   137→      const ctx = canvas.getContext('2d')!
+   138→      ctx.fillStyle = '#FDFAF3'
+   139→      ctx.fillRect(0, 0, W, H)
+   140→      // header strip
+   141→      ctx.fillStyle = brand
+   142→      ctx.fillRect(28, 24, 22, 22)
+   143→      ctx.fillStyle = '#2E2B26'
+   144→      ctx.font = '700 26px system-ui, sans-serif'
+   145→      ctx.fillText('FORMA', 62, 43)
+   146→      ctx.font = '500 13px system-ui, sans-serif'
+   147→      ctx.fillStyle = '#8A8375'
+   148→      ctx.textAlign = 'right'
+   149→      ctx.fillText(`${projectName || 'Untitled project'} · ${(room.w * room.d).toFixed(0)} m² · ${seatCount} seats · ${fmtMoney(cost.total)}`, W - 28, 42)
+   150→      ctx.textAlign = 'left'
+   151→      ctx.drawImage(img, 0, 72, img.width * scale, img.height * scale)
+   152→
+   153→      const slug = (projectName || 'layout').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'layout'
+   154→      const a = document.createElement('a')
+   155→      a.href = canvas.toDataURL('image/png')
+   156→      a.download = `forma-plan-${slug}.png`
+   157→      document.body.appendChild(a)
+   158→      a.click()
+   159→      a.remove()
+   160→      toast({ title: 'Plan image saved', description: 'A high-resolution PNG of your floor plan was downloaded.' })
+   161→    } catch {
+   162→      toast({ title: 'Export failed', description: 'Could not render the plan image. Please try again.', variant: 'destructive' })
+   163→    } finally {
+   164→      setPngBusy(false)
+   165→    }
+   166→  }
+   167→
+   168→  // seat count via catalog
+   169→  const seatCount = useMemo(() => {
+   170→    let n = 0
+   171→    for (const it of items) {
+   172→      const cat = getItem(it.id)
+   173→      if (cat) n += cat.seats
+   174→    }
+   175→    return n
+   176→  }, [items])
+   177→
+   178→  const venue: 'cafe' | 'coworking' | 'boutique' | 'restaurant' = templateId === 'custom' ? 'cafe' : templateId
+   179→  const cap = useMemo(() => computeCapacity(items, room, venue), [items, room, venue])
+   180→
+   181→  const budgetState = budget !== null ? budgetStatusOf(cost.total, budget) : null
+   182→  const overBudget = budgetState?.status === 'over'
+   183→
+   184→  function commitBudget(raw: string) {
+   185→    const n = Number(raw.replace(/[^0-9]/g, ''))
+   186→    setBudget(raw.trim() === '' || Number.isNaN(n) || n <= 0 ? null : n)
+   187→  }
+   188→
+   189→  function commitCap(cat: Category, raw: string) {
+   190→    const n = Number(raw.replace(/[^0-9]/g, ''))
+   191→    setCategoryBudget(cat, raw.trim() === '' || Number.isNaN(n) || n <= 0 ? null : n)
+   192→    setCapDrafts((d) => {
+   193→      const next = { ...d }
+   194→      delete next[cat]
+   195→      return next
+   196→    })
+   197→  }
+   198→
+   199→  // caps summary: how many categories have caps and how they are doing
+   200→  const cappedCats = ALL_CATEGORIES.filter((c) => categoryBudgets[c] !== undefined)
+   201→  const overCaps = cappedCats.filter((c) => budgetStatusOf(catSpend[c], categoryBudgets[c]!).status === 'over')
+   202→  const closeCaps = cappedCats.filter((c) => budgetStatusOf(catSpend[c], categoryBudgets[c]!).status === 'close')
+   203→
+   204→  return (
+   205→    <Sheet open={costOpen} onOpenChange={setCostOpen}>
+   206→      <SheetContent side="right" className="flex w-[380px] max-w-[92vw] flex-col gap-0 border-stone-200 bg-warmwhite p-0 sm:max-w-[380px]">
+   207→        <SheetHeader className="border-b border-stone-200/80 bg-white/60 px-5 py-4">
+   208→          <SheetTitle className="font-display flex items-center gap-2 text-base font-bold text-charcoal">
+   209→            <Calculator className="h-4 w-4" style={{ color: brand }} />
+   210→            Cost estimate
+   211→          </SheetTitle>
+   212→          <SheetDescription className="text-xs text-stone-500">
+   213→            Rough fit-out totals — supply prices, updates live as you place items.
+   214→          </SheetDescription>
+   215→        </SheetHeader>
+   216→
+   217→        <ScrollArea className="min-h-0 flex-1">
+   218→          {/* grid track with minmax(0,1fr): keeps nowrap "truncate" rows from
+   219→              inflating the scroll-area's table layout beyond the panel width */}
+   220→          <div className="grid grid-cols-[minmax(0,1fr)] px-5 py-4">
+   221→            {/* ── budget guardrail ─────────────────────────────────── */}
+   222→            <section
+   223→              aria-label="Budget guardrail"
+   224→              className={cn(
+   225→                'rounded-xl border bg-white/80 p-3.5 shadow-xs transition-colors',
+   226→                overBudget ? 'border-red-300/80' : 'border-stone-200/80',
+   227→              )}
+   228→            >
+   229→              <div className="flex items-center justify-between gap-2">
+   230→                <p className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+   231→                  <Target className="h-3.5 w-3.5" style={{ color: brand }} />
+   232→                  Budget guardrail
+   233→                </p>
+   234→                {budget !== null && (
+   235→                  <button
+   236→                    onClick={() => { setBudgetDraft(''); setBudget(null) }}
+   237→                    className="rounded px-1.5 py-0.5 text-[10px] font-medium text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600"
+   238→                  >
+   239→                    Clear
+   240→                  </button>
+   241→                )}
+   242→              </div>
+   243→
+   244→              <div className="mt-2.5 flex items-center gap-2">
+   245→                <div className="relative flex-1">
+   246→                  <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-stone-400">$</span>
+   247→                  <input
+   248→                    inputMode="numeric"
+   249→                    value={budgetDraft || (budget !== null ? String(budget) : '')}
+   250→                    onChange={(e) => setBudgetDraft(e.target.value)}
+   251→                    onBlur={(e) => commitBudget(e.target.value)}
+   252→                    onKeyDown={(e) => {
+   253→                      if (e.key === 'Enter') { commitBudget((e.target as HTMLInputElement).value); (e.target as HTMLInputElement).blur() }
+   254→                    }}
+   255→                    placeholder="Set a budget…"
+   256→                    aria-label="Budget in US dollars"
+   257→                    className={cn(
+   258→                      'h-8 w-full rounded-lg border bg-white pl-6 pr-2 text-xs font-semibold tabular-nums text-charcoal shadow-xs outline-none transition-colors placeholder:font-normal placeholder:text-stone-300',
+   259→                      overBudget ? 'border-red-300 focus:border-red-400' : 'border-stone-200 focus:border-stone-400',
+   260→                    )}
+   261→                  />
+   262→                </div>
+   263→                {BUDGET_PRESETS.map((p) => (
+   264→                  <button
+   265→                    key={p}
+   266→                    onClick={() => { setBudgetDraft(''); setBudget(p) }}
+   267→                    aria-label={`Set budget ${p / 1000}k`}
+   268→                    className={cn(
+   269→                      'hidden h-8 shrink-0 rounded-lg border px-2 text-[10px] font-semibold tabular-nums transition-colors sm:block',
+   270→                      budget === p
+   271→                        ? 'border-charcoal bg-charcoal text-warmwhite'
+   272→                        : 'border-stone-200 bg-white text-stone-500 hover:border-stone-300 hover:text-charcoal',
+   273→                    )}
+   274→                  >
+   275→                    {p / 1000}k
+   276→                  </button>
+   277→                ))}
+   278→              </div>
+   279→
+   280→              {budget !== null && budgetState && (
+   281→                <div className="mt-3">
+   282→                  <div
+   283→                    role="progressbar"
+   284→                    aria-valuenow={Math.round(Math.min(100, budgetState.pct * 100))}
+   285→                    aria-valuemin={0}
+   286→                    aria-valuemax={100}
+   287→                    aria-label="Budget used"
+   288→                    className="h-2 w-full overflow-hidden rounded-full bg-stone-100 shadow-[inset_0_1px_2px_rgba(46,43,38,0.08)]"
+   289→                  >
+   290→                    <div
+   291→                      className={cn('h-full rounded-full transition-[width] duration-500 ease-out', BUDGET_META[budgetState.status].bar)}
+   292→                      style={{ width: `${Math.min(100, budgetState.pct * 100)}%` }}
+   293→                    />
+   294→                  </div>
+   295→                  <div className="mt-1.5 flex items-center justify-between text-[11px]">
+   296→                    <span className={cn('inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold', BUDGET_META[budgetState.status].cls)}>
+   297→                      {overBudget && <TriangleAlert className="h-3 w-3" aria-hidden />}
+   298→                      {BUDGET_META[budgetState.status].label}
+   299→                    </span>
+   300→                    <span className="tabular-nums text-stone-500">
+   301→                      <span className="font-semibold text-charcoal">{fmtMoney(cost.total)}</span>
+   302→                      {' / '}
+   303→                      {fmtMoney(budget)}
+   304→                      {overBudget && (
+   305→                        <span className="ml-1 font-semibold text-red-600">({fmtMoney(cost.total - budget)} over)</span>
+   306→                      )}
+   307→                    </span>
+   308→                  </div>
+   309→                </div>
+   310→              )}
+   311→            </section>
+   312→
+   313→            {/* ── category caps ─────────────────────────────────────── */}
+   314→            <section
+   315→              aria-label="Category caps"
+   316→              className={cn(
+   317→                'mt-4 rounded-xl border bg-white/80 p-3.5 shadow-xs transition-colors',
+   318→                overCaps.length > 0 ? 'border-red-300/80' : 'border-stone-200/80',
+   319→              )}
+   320→            >
+   321→              <div className="flex items-center justify-between gap-2">
+   322→                <p className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+   323→                  <SlidersHorizontal className="h-3.5 w-3.5" style={{ color: brand }} />
+   324→                  Category caps
+   325→                </p>
+   326→                {cappedCats.length > 0 && (
+   327→                  overCaps.length > 0 ? (
+   328→                    <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
+   329→                      <TriangleAlert className="h-3 w-3" aria-hidden />
+   330→                      {overCaps.length} over
+   331→                    </span>
+   332→                  ) : closeCaps.length > 0 ? (
+   333→                    <span className="rounded-full border border-amber-200 bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+   334→                      {closeCaps.length} close
+   335→                    </span>
+   336→                  ) : (
+   337→                    <span className="rounded-full border border-emerald-200 bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">
+   338→                      on track
+   339→                    </span>
+   340→                  )
+   341→                )}
+   342→              </div>
+   343→              <ul className="mt-2.5 space-y-1.5">
+   344→                {ALL_CATEGORIES.map((c) => {
+   345→                  const cap = categoryBudgets[c]
+   346→                  const spend = catSpend[c]
+   347→                  const st = cap !== undefined ? budgetStatusOf(spend, cap) : null
+   348→                  const meta = CATEGORY_META[c]
+   349→                  return (
+   350→                    <li key={c}>
+   351→                      <div className="flex items-center gap-2">
+   352→                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: meta.color }} aria-hidden />
+   353→                        <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-stone-600">{meta.label}</span>
+   354→                        <span className="w-14 shrink-0 text-right text-[11px] font-semibold tabular-nums text-charcoal">
+   355→                          {spend >= 1000 ? `$${(Math.round(spend / 100) / 10).toFixed(1)}k` : fmtMoney(spend)}
+   356→                        </span>
+   357→                        <div className="relative w-[72px] shrink-0">
+   358→                          <span className="pointer-events-none absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-stone-300">$</span>
+   359→                          <input
+   360→                            inputMode="numeric"
+   361→                            value={capDrafts[c] ?? (cap !== undefined ? String(cap) : '')}
+   362→                            onChange={(e) => setCapDrafts((d) => ({ ...d, [c]: e.target.value }))}
+   363→                            onBlur={(e) => commitCap(c, e.target.value)}
+   364→                            onKeyDown={(e) => {
+   365→                              if (e.key === 'Enter') {
+   366→                                commitCap(c, (e.target as HTMLInputElement).value)
+   367→                                ;(e.target as HTMLInputElement).blur()
+   368→                              }
+   369→                            }}
+   370→                            placeholder="cap"
+   371→                            aria-label={`${meta.label} spending cap in dollars`}
+   372→                            className={cn(
+   373→                              'h-7 w-full rounded-md border bg-white pl-4 pr-1.5 text-[10.5px] font-semibold tabular-nums text-charcoal shadow-xs outline-none transition-colors placeholder:font-normal placeholder:text-stone-300',
+   374→                              st?.status === 'over'
+   375→                                ? 'border-red-300 focus:border-red-400'
+   376→                                : cap !== undefined
+   377→                                  ? 'border-stone-300/90 focus:border-stone-400'
+   378→                                  : 'border-stone-200 focus:border-stone-400',
+   379→                            )}
+   380→                          />
+   381→                        </div>
+   382→                      </div>
+   383→                      {st && cap !== undefined && (
+   384→                        <div className="mt-1 flex items-center gap-1.5 pl-4">
+   385→                          <div
+   386→                            role="progressbar"
+   387→                            aria-valuenow={Math.round(Math.min(100, st.pct * 100))}
+   388→                            aria-valuemin={0}
+   389→                            aria-valuemax={100}
+   390→                            aria-label={`${meta.label} cap usage`}
+   391→                            className="h-1.5 flex-1 overflow-hidden rounded-full bg-stone-100 shadow-[inset_0_1px_2px_rgba(46,43,38,0.08)]"
+   392→                          >
+   393→                            <div
+   394→                              className={cn('h-full rounded-full transition-[width] duration-500 ease-out', CAP_META[st.status].bar)}
+   395→                              style={{ width: `${Math.min(100, st.pct * 100)}%` }}
+   396→                            />
+   397→                          </div>
+   398→                          <span
+   399→                            className={cn(
+   400→                              'w-11 shrink-0 text-right text-[9.5px] font-semibold tabular-nums',
+   401→                              st.status === 'over' ? 'text-red-600' : st.status === 'close' ? 'text-amber-700' : 'text-emerald-700',
+   402→                            )}
+   403→                          >
+   404→                            {Math.round(st.pct * 100)}%
+   405→                          </span>
+   406→                        </div>
+   407→                      )}
+   408→                    </li>
+   409→                  )
+   410→                })}
+   411→              </ul>
+   412→              <p className="mt-2 text-[10px] leading-snug text-stone-400">
+   413→                Caps stay on this device — they flag overspends per category while you place items.
+   414→              </p>
+   415→            </section>
+   416→
+   417→            {/* ── zone breakdown (area / seats / spend per zone) ───── */}
+   418→            <ZoneBreakdownCard />
+   419→
+   420→            {/* ── readiness checks (compliance) ────────────────────── */}
+   421→            <div className="mt-4">
+   422→              <ReadinessCard />
+   423→            </div>
+   424→
+   425→            {/* ── layout insights ──────────────────────────────────── */}
+   426→            <div className="mt-4">
+   427→              <InsightsCard />
+   428→            </div>
+   429→
+   430→            {/* ── category breakdown ───────────────────────────────── */}
+   431→            {slices.length > 0 && (
+   432→              <section aria-label="Spend by category" className="mt-4">
+   433→                <p className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+   434→                  <Wallet className="h-3.5 w-3.5 text-stone-400" />
+   435→                  Spend by category
+   436→                </p>
+   437→                {/* stacked ribbon */}
+   438→                <div className="mt-2.5 flex h-2.5 w-full gap-px overflow-hidden rounded-full bg-stone-100 shadow-[inset_0_1px_2px_rgba(46,43,38,0.08)]" aria-hidden>
+   439→                  {slices.map((s) => (
+   440→                    <div
+   441→                      key={s.category}
+   442→                      className="h-full transition-[width] duration-500 ease-out"
+   443→                      style={{ width: `${s.pct * 100}%`, backgroundColor: s.color }}
+   444→                    />
+   445→                  ))}
+   446→                </div>
+   447→                <ul className="mt-2.5 space-y-1">
+   448→                  {slices.map((s) => (
+   449→                    <li key={s.category} className="flex items-center gap-2 rounded-md px-1 py-0.5 text-[11px] transition-colors hover:bg-white/70">
+   450→                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: s.color }} aria-hidden />
+   451→                      <span className="min-w-0 flex-1 truncate font-medium text-stone-600">{s.label}</span>
+   452→                      <span className="shrink-0 tabular-nums text-stone-400">{Math.round(s.pct * 100)}%</span>
+   453→                      <span className="w-16 shrink-0 text-right font-semibold tabular-nums text-charcoal">{fmtMoney(s.total)}</span>
+   454→                    </li>
+   455→                  ))}
+   456→                </ul>
+   457→              </section>
+   458→            )}
+   459→
+   460→            {/* ── line items ───────────────────────────────────────── */}
+   461→            <section aria-label="Line items" className="mt-4">
+   462→              <p className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+   463→                <Landmark className="h-3.5 w-3.5 text-stone-400" />
+   464→                Bill of materials
+   465→                <span className="ml-auto font-sans text-[10px] font-medium normal-case tracking-normal text-stone-400">
+   466→                  {cost.lines.length} {cost.lines.length === 1 ? 'line' : 'lines'}
+   467→                </span>
+   468→              </p>
+   469→              {cost.lines.length === 0 ? (
+   470→                <p className="py-8 text-center text-xs text-stone-400">
+   471→                  Place furniture to build your estimate.
+   472→                </p>
+   473→              ) : (
+   474→                <ul className="mt-2 space-y-1">
+   475→                  {cost.lines.map((l) => {
+   476→                    const custom = (l as { custom?: boolean }).custom
+   477→                    return (
+   478→                      <li key={l.id} className="flex items-baseline justify-between gap-3 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-white/70">
+   479→                        <span className="min-w-0 flex-1 truncate font-medium text-stone-700">
+   480→                          {l.name}
+   481→                          {l.qty > 1 && <span className="ml-1.5 text-stone-400">×{l.qty}</span>}
+   482→                          {custom && (
+   483→                            <span className="ml-1.5 inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide text-amber-800">
+   484→                              <PenLine className="h-2.5 w-2.5" aria-hidden />
+   485→                              custom
+   486→                            </span>
+   487→                          )}
+   488→                        </span>
+   489→                        <span className={cn('shrink-0 tabular-nums', custom ? 'font-medium text-amber-700' : 'text-stone-400')}>
+   490→                          {fmtMoney(l.unit)}
+   491→                        </span>
+   492→                        <span className="w-20 shrink-0 text-right font-semibold tabular-nums text-charcoal">
+   493→                          {fmtMoney(l.total)}
+   494→                        </span>
+   495→                      </li>
+   496→                    )
+   497→                  })}
+   498→                </ul>
+   499→              )}
+   500→            </section>
+   501→          </div>
+   502→        </ScrollArea>
+   503→
+   504→        <div className="border-t border-stone-200/80 bg-white/70 px-5 py-4">
+   505→          <div className="space-y-1.5 text-xs text-stone-500">
+   506→            <div className="flex justify-between"><span>Subtotal</span><span className="tabular-nums">{fmtMoney(cost.subtotal)}</span></div>
+   507→            <div className="flex justify-between"><span>Delivery &amp; install · 12%</span><span className="tabular-nums">{fmtMoney(cost.install)}</span></div>
+   508→            <div className="flex justify-between"><span>Contingency · 8%</span><span className="tabular-nums">{fmtMoney(cost.contingency)}</span></div>
+   509→          </div>
+   510→          <Separator className="my-3" />
+   511→          {hasCustom && (
+   512→            <p className="mb-2 rounded-md bg-amber-100/70 px-2.5 py-1.5 text-[10.5px] font-medium text-amber-800">
+   513→              Custom unit prices applied — select an item in the room to adjust.
+   514→            </p>
+   515→          )}
+   516→          <div className="flex items-baseline justify-between">
+   517→            <span className="font-display text-sm font-semibold text-charcoal">Estimated total</span>
+   518→            <span className="font-display text-xl font-bold tabular-nums" style={{ color: overBudget ? '#B91C1C' : brand }}>
+   519→              {fmtMoney(cost.total)}
+   520→            </span>
+   521→          </div>
+   522→          <div className="mt-3 flex items-center gap-2">
+   523→            <Button2
+   524→              disabled={cost.lines.length === 0}
+   525→              onClick={() =>
+   526→                downloadBomCsv(
+   527→                  projectName, templateId, room.w * room.d, seatCount,
+   528→                  cost.lines, cost.subtotal, cost.install, cost.contingency, cost.total, budget,
+   529→                  cappedCats.map((c) => ({
+   530→                    label: CATEGORY_META[c].label,
+   531→                    cap: categoryBudgets[c]!,
+   532→                    spend: catSpend[c],
+   533→                    status: budgetStatusOf(catSpend[c], categoryBudgets[c]!).status,
+   534→                  })),
+   535→                )
+   536→              }
+   537→            >
+   538→              <Download className="h-3.5 w-3.5" />
+   539→              BOM · CSV
+   540→            </Button2>
+   541→            <Button2 onClick={downloadPlanPng} disabled={pngBusy || items.length === 0}>
+   542→              <ImageDown className="h-3.5 w-3.5" />
+   543→              {pngBusy ? 'Rendering…' : 'Plan · PNG'}
+   544→            </Button2>
+   545→            <p className="flex-1 text-[10px] leading-snug text-stone-400">
+   546→              Venue: {VENUES[venue].label.toLowerCase()} · {seatCount} {seatCount === 1 ? 'seat' : 'seats'} · load {cap.occupantLoad}/{EXIT_CAPACITY}
+   547→            </p>
+   548→          </div>
+   549→          <p className="mt-3 flex items-start gap-1.5 text-[10.5px] leading-relaxed text-stone-400">
+   550→            <Info className="mt-px h-3 w-3 shrink-0" />
+   551→            Ballpark figures for early planning only. Get trade quotes before committing a budget.
+   552→          </p>
+   553→        </div>
+   554→      </SheetContent>
+   555→
+   556→      {/* hidden full-fidelity plan for PNG rendering (offscreen) */}
+   557→      <div className="pointer-events-none fixed -left-[9999px] top-0" aria-hidden>
+   558→        <PlanSVG
+   559→          refCb={(el) => { pngSvgRef.current = el }}
+   560→          room={room}
+   561→          items={items}
+   562→          brand={brand}
+   563→          showFire={showFire}
+   564→          detailed
+   565→          palette={planPalette}
+   566→          zones={zones}
+   567→          showZones={showZones}
+   568→        />
+   569→      </div>
+   570→    </Sheet>
+   571→  )
+   572→}
+   573→
+   574→/** tiny local button so the sheet stays dependency-light */
+   575→function Button2({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) {
+   576→  return (
+   577→    <button
+   578→      onClick={onClick}
+   579→      disabled={disabled}
+   580→      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-stone-300/80 bg-white px-2.5 text-[11px] font-semibold text-charcoal shadow-xs transition-colors hover:border-stone-400 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
+   581→    >
+   582→      {children}
+   583→    </button>
+   584→  )
+   585→}
+   586→
+   587→/** per-zone area / seats / spend — feeds the "open zone editor" shortcut */
+   588→function ZoneBreakdownCard() {
+   589→  const zones = usePlanner((s) => s.zones)
+   590→  const items = usePlanner((s) => s.items)
+   591→  const room = usePlanner((s) => s.room)
+   592→  const brand = usePlanner((s) => s.brandColor)
+   593→  const stats = useMemo(() => computeZoneStats(zones, items, room), [zones, items, room])
+   594→
+   595→  if (zones.length === 0) {
+   596→    return (
+   597→      <section aria-label="Zone breakdown" className="mt-4 rounded-xl border border-dashed border-stone-300 bg-white/60 p-3.5">
+   598→        <p className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+   599→          <LayoutGrid className="h-3.5 w-3.5 text-stone-400" />
+   600→          Zone breakdown
+   601→        </p>
+   602→        <p className="mt-1.5 text-[11px] leading-relaxed text-stone-400">
+   603→          Sketch service / seating / retail zones to see the floor split by area, seats and spend.
+   604→        </p>
+   605→        <button
+   606→          type="button"
+   607→          onClick={openZoneEditor}
+   608→          className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-stone-300/80 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-charcoal shadow-xs transition-colors hover:border-stone-400 hover:bg-stone-50"
+   609→        >
+   610→          <PenLine className="h-3 w-3" />
+   611→          Open the zone editor
+   612→        </button>
+   613→      </section>
+   614→    )
+   615→  }
+   616→
+   617→  return (
+   618→    <section aria-label="Zone breakdown" className="mt-4 rounded-xl border border-stone-200/80 bg-white/80 p-3.5 shadow-xs">
+   619→      <div className="flex items-center justify-between gap-2">
+   620→        <p className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+   621→          <LayoutGrid className="h-3.5 w-3.5" style={{ color: brand }} />
+   622→          Zone breakdown
+   623→        </p>
+   624→        <button
+   625→          type="button"
+   626→          onClick={openZoneEditor}
+   627→          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-stone-400 transition-colors hover:bg-stone-100 hover:text-charcoal"
+   628→          title="Draw, move or rename zones"
+   629→        >
+   630→          <PenLine className="h-3 w-3" aria-hidden />
+   631→          Edit
+   632→        </button>
+   633→      </div>
+   634→      <ul className="mt-2.5 space-y-2">
+   635→        {stats.map(({ zone, area, seats, spend, pieces, pctOfFloor }) => {
+   636→          const color = ZONE_META[zone.kind].color
+   637→          return (
+   638→            <li key={zone.id}>
+   639→              <div className="flex items-center gap-2">
+   640→                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} aria-hidden />
+   641→                <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-charcoal">{zone.label}</span>
+   642→                {seats > 0 && (
+   643→                  <span className="shrink-0 rounded bg-stone-100 px-1 py-px text-[9px] font-bold tabular-nums text-stone-500" title={`${seats} seats inside`}>
+   644→                    {seats} {seats === 1 ? 'seat' : 'seats'}
+   645→                  </span>
+   646→                )}
+   647→                <span className="w-12 shrink-0 text-right text-[10.5px] font-medium tabular-nums text-stone-500" title={`${pieces} pieces inside`}>
+   648→                  {area.toFixed(1)} m²
+   649→                </span>
+   650→                <span className="w-14 shrink-0 text-right text-[11px] font-semibold tabular-nums text-charcoal">
+   651→                  {spend >= 1000 ? `$${(Math.round(spend / 100) / 10).toFixed(1)}k` : fmtMoney(spend)}
+   652→                </span>
+   653→              </div>
+   654→              <div className="mt-1 flex items-center gap-1.5 pl-4">
+   655→                <div
+   656→                  className="h-1.5 flex-1 overflow-hidden rounded-full bg-stone-100 shadow-[inset_0_1px_2px_rgba(46,43,38,0.08)]"
+   657→                  role="meter"
+   658→                  aria-label={`${zone.label} share of floor area`}
+   659→                  aria-valuenow={Math.round(pctOfFloor * 100)}
+   660→                  aria-valuemin={0}
+   661→                  aria-valuemax={100}
+   662→                >
+   663→                  <div
+   664→                    className="h-full rounded-full transition-[width] duration-500 ease-out"
+   665→                    style={{ width: `${Math.min(100, pctOfFloor * 100)}%`, backgroundColor: color }}
+   666→                  />
+   667→                </div>
+   668→                <span className="w-11 shrink-0 text-right text-[9.5px] font-semibold tabular-nums text-stone-400">
+   669→                  {Math.round(pctOfFloor * 100)}% floor
+   670→                </span>
+   671→              </div>
+   672→            </li>
+   673→          )
+   674→        })}
+   675→      </ul>
+   676→      <p className="mt-2 text-[10px] leading-snug text-stone-400">
+   677→        An item counts toward a zone when its center falls inside; zones may overlap, so shares can sum past 100%.
+   678→      </p>
+   679→    </section>
+   680→  )
+   681→}
+   682→

@@ -104,6 +104,10 @@ interface PlannerState {
   ctxMenu: { uid: string; x: number; y: number } | null
   /** monotonically increasing counter — CameraRig reacts to changes */
   zoomReq: { kind: 'in' | 'out' | 'fit'; n: number }
+  /** floor measure tool: armed state + the two sampled points (session-only) */
+  measureMode: boolean
+  measureA: { x: number; z: number } | null
+  measureB: { x: number; z: number } | null
 
   setRoom: (w: number, d: number) => void
   /** create a functional zone (defaults to a 3×2 m rect at room center); returns the new zone */
@@ -126,6 +130,14 @@ interface PlannerState {
   openContextMenu: (uid: string, x: number, y: number) => void
   closeContextMenu: () => void
   requestZoom: (kind: 'in' | 'out' | 'fit') => void
+  /** arm/disarm the floor measure tool (clears sampled points when arming) */
+  setMeasureMode: (on: boolean) => void
+  /** exit the measure tool entirely: mode off + points cleared */
+  stopMeasure: () => void
+  /** record a measure click: first click sets A, second sets B, next click restarts */
+  setMeasurePoint: (p: { x: number; z: number }) => void
+  /** clear the sampled measure points (tool stays armed) */
+  clearMeasure: () => void
   setViewMode: (m: ViewMode) => void
   toggleFire: () => void
   toggleZones: () => void
@@ -215,6 +227,9 @@ export const usePlanner = create<PlannerState>()(
       redoDepth: 0,
       ctxMenu: null,
       zoomReq: { kind: 'fit', n: 0 },
+      measureMode: false,
+      measureA: null,
+      measureB: null,
 
       setRoom: (w, d) => {
         pushHistory(get(), 'room')
@@ -316,6 +331,8 @@ export const usePlanner = create<PlannerState>()(
           armedId: catalogId,
           selectedUid: catalogId ? null : s.selectedUid,
           ctxMenu: null,
+          // placing furniture and measuring are mutually exclusive tools
+          measureMode: catalogId ? false : s.measureMode,
         })),
 
       openContextMenu: (uid, x, y) => set({ ctxMenu: { uid, x, y }, selectedUid: uid, armedId: null }),
@@ -323,6 +340,29 @@ export const usePlanner = create<PlannerState>()(
 
       requestZoom: (kind) =>
         set((s) => ({ zoomReq: { kind, n: s.zoomReq.n + 1 } })),
+
+      setMeasureMode: (on) =>
+        set((s) => ({
+          measureMode: on,
+          // fresh arm: start a new measurement
+          measureA: on ? null : s.measureA,
+          measureB: on ? null : s.measureB,
+          armedId: on ? null : s.armedId,
+          ctxMenu: on ? null : s.ctxMenu,
+        })),
+
+      stopMeasure: () => set({ measureMode: false, measureA: null, measureB: null }),
+
+      setMeasurePoint: (p) =>
+        set((s) => {
+          if (!s.measureMode) return s
+          if (!s.measureA) return { measureA: { x: snap(p.x), z: snap(p.z) } }
+          if (!s.measureB) return { measureB: { x: snap(p.x), z: snap(p.z) } }
+          // third click restarts with a new baseline
+          return { measureA: { x: snap(p.x), z: snap(p.z) }, measureB: null }
+        }),
+
+      clearMeasure: () => set({ measureA: null, measureB: null }),
 
       setViewMode: (m) => set({ viewMode: m }),
       toggleFire: () => set((s) => ({ showFire: !s.showFire })),

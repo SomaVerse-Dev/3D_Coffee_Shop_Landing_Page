@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Grid2x2Check, Hand, PenLine, Plus, SquareDashedMousePointer, Trash2 } from 'lucide-react'
+import { Grid2x2Check, Hand, Move as MoveIcon, PenLine, Plus, SquareDashedMousePointer, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
@@ -75,6 +75,25 @@ export default function ZoneEditor({ open, onOpenChange }: ZoneEditorProps) {
   useEffect(() => {
     if (open && !showZones) toggleZones()
   }, [open])
+
+  // arrow keys nudge the selected zone (ignore when typing in an input)
+  useEffect(() => {
+    if (!open || !selectedId) return
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.key.startsWith('Arrow')) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      const zn = zones.find((z) => z.id === selectedId)
+      if (!zn) return
+      e.preventDefault()
+      const step = e.shiftKey ? 0.5 : 0.1
+      const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0
+      const dz = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0
+      updateZone(selectedId, { x: Math.round((zn.x + dx) * 10) / 10, z: Math.round((zn.z + dz) * 10) / 10 })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, selectedId, zones, updateZone])
 
   const pad = 0.55
   const vb = `${-room.w / 2 - pad} ${-room.d / 2 - pad} ${room.w + pad * 2} ${room.d + pad * 2}`
@@ -451,6 +470,15 @@ export default function ZoneEditor({ open, onOpenChange }: ZoneEditorProps) {
                   </Button>
                 )}
               </div>
+              {selectedId && (
+                <p className="mt-1.5 flex items-center gap-1.5 text-[9.5px] text-stone-400">
+                  <MoveIcon className="h-3 w-3 shrink-0" />
+                  <span>
+                    Arrow keys nudge the selected zone —
+                    hold <kbd className="rounded border border-stone-300 bg-white px-1 font-mono text-[9px] text-charcoal">⇧</kbd> for 50 cm
+                  </span>
+                </p>
+              )}
             </div>
           </div>
         </div>

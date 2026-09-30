@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
-import { BookmarkPlus, Clock, History, Loader2, RotateCcw, Trash2 } from 'lucide-react'
+import { BookmarkPlus, Clock, GitCompareArrows, History, Loader2, RotateCcw, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast'
 import { usePlanner } from '@/lib/planner/store'
 import { computeCost, fmtMoney } from '@/lib/planner/capacity'
 import { cn } from '@/lib/utils'
+import HistoryDiffDialog from './HistoryDiffDialog'
 
 function delta(n: number, unit: string): { text: string; cls: string } {
   if (n === 0) return { text: `±0 ${unit}`, cls: 'text-stone-300' }
@@ -27,6 +28,7 @@ export default function SessionHistory() {
   const [saving, setSaving] = useState(false)
   const [restoringId, setRestoringId] = useState<string | null>(null)
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
+  const [diffOpen, setDiffOpen] = useState(false)
   const checkpoints = usePlanner((s) => s.checkpoints)
   const saveCheckpoint = usePlanner((s) => s.saveCheckpoint)
   const deleteCheckpoint = usePlanner((s) => s.deleteCheckpoint)
@@ -137,6 +139,21 @@ export default function SessionHistory() {
           </div>
         </div>
 
+        {/* compare checkpoints */}
+        {checkpoints.length > 0 && (
+          <div className="border-b border-stone-200/70 px-4 pb-3 pt-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDiffOpen(true)}
+              className="h-8 w-full gap-1.5 border-stone-300/80 bg-white text-[11px] font-semibold shadow-xs hover:bg-stone-50 hover:border-stone-400/70"
+            >
+              <GitCompareArrows className="h-3.5 w-3.5 text-stone-400" />
+              Compare layouts side by side
+            </Button>
+          </div>
+        )}
+
         {/* checkpoint list */}
         <div className="p-2">
           <div className="thin-scroll max-h-[320px] overflow-y-auto">
@@ -242,6 +259,8 @@ export default function SessionHistory() {
           )}
         </div>
       </PopoverContent>
+
+      <HistoryDiffDialog open={diffOpen} onOpenChange={setDiffOpen} />
     </Popover>
   )
 }

@@ -3,7 +3,7 @@
 import * as THREE from 'three'
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame, type ThreeEvent } from '@react-three/fiber'
-import { Grid, OrbitControls } from '@react-three/drei'
+import { Grid, Html, Line, OrbitControls } from '@react-three/drei'
 import { useTheme } from 'next-themes'
 import { damp, damp3 } from 'maath/easing'
 import { usePlanner, clampToRoom } from '@/lib/planner/store'
@@ -60,6 +60,99 @@ function floorPoint(e: ThreeEvent<PointerEvent | MouseEvent>): { x: number; z: n
     x: e.ray.origin.x + e.ray.direction.x * t,
     z: e.ray.origin.z + e.ray.direction.z * t,
   }
+}
+
+// ─── Floor measure tool ───────────────────────────────────────────────────
+
+/** meters → feet/inches string, e.g. 2.4 m → 7′10″ */
+function feetInches(m: number): string {
+  const totalIn = m * 39.3701
+  const ft = Math.floor(totalIn / 12)
+  let inch = Math.round(totalIn - ft * 12)
+  let ftOut = ft
+  if (inch === 12) {
+    ftOut += 1
+    inch = 0
+  }
+  return `${ftOut}′${inch}″`
+}
+
+const MEASURE_INK = '#2E2B26'
+
+function MeasureMarker({ x, z, color }: { x: number; z: number; color: string }) {
+  return (
+    <group position={[x, 0.022, z]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={3}>
+        <ringGeometry args={[0.09, 0.14, 28]} />
+        <meshBasicMaterial color={color} depthWrite={false} transparent opacity={0.95} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={3}>
+        <circleGeometry args={[0.045, 20]} />
+        <meshBasicMaterial color={color} depthWrite={false} />
+      </mesh>
+    </group>
+  )
+}
+
+/**
+ * The tape-measure overlay: two sampled points, a straight run between them
+ * and a floating distance label. While only A is set, the line follows the
+ * cursor as a dashed preview.
+ */
+function MeasureGizmo({
+  a, b, hover,
+}: {
+  a: { x: number; z: number }
+  b: { x: number; z: number } | null
+  hover: { x: number; z: number } | null
+}) {
+  const target = b ?? (hover && (Math.abs(hover.x - a.x) > 0.01 || Math.abs(hover.z - a.z) > 0.01) ? hover : null)
+  const dist = target ? Math.hypot(target.x - a.x, target.z - a.z) : 0
+  const mid = target ? { x: (a.x + target.x) / 2, z: (a.z + target.z) / 2 } : null
+  const confirmed = b !== null
+
+  return (
+    <group renderOrder={3}>
+      {target && (
+        <Line
+          points={[
+            [a.x, 0.025, a.z],
+            [target.x, 0.025, target.z],
+          ]}
+          color={MEASURE_INK}
+          lineWidth={2}
+          dashed={!confirmed}
+          dashSize={0.14}
+          gapSize={0.1}
+          transparent
+          opacity={confirmed ? 0.95 : 0.65}
+          renderOrder={3}
+        />
+      )}
+      <MeasureMarker x={a.x} z={a.z} color={MEASURE_INK} />
+      {b && <MeasureMarker x={b.x} z={b.z} color="#16A34A" />}
+      {mid && (
+        <Html position={[mid.x, 0.05, mid.z]} center style={{ pointerEvents: 'none' }} zIndexRange={[30, 0]}>
+          <div
+            className="flex items-center gap-1.5 whitespace-nowrap rounded-full bg-charcoal/92 px-2.5 py-1 shadow-md ring-1 ring-white/20"
+            data-testid="measure-label"
+          >
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{ backgroundColor: confirmed ? '#4ADE80' : '#D6D3D1' }}
+              aria-hidden
+            />
+            <span className="font-display text-[11.5px] font-bold tabular-nums leading-none text-warmwhite">
+              {dist.toFixed(2)} m
+            </span>
+            <span className="text-[9.5px] font-medium tabular-nums leading-none text-stone-300">
+              {feetInches(dist)}
+            </span>
+          </div>
+        </Html>
+      )}
+    </group>
+  )
 }
 
 function ZoneWashes({ zones, dark }: { zones: ReturnType<typeof drawableZones>; dark: boolean }) {
@@ -345,7 +438,7 @@ function EgressPaths({ w, d }: { w: number; d: number }) {
 // ─── Placed items with drag support ────────────────────────────────────────
 
 function PlacedItemView({
-  uid, id, x, z, rot, brand, selected, dragging,
+  uid, id, x, z, rot, brand, selected, dragging, interactive,
   onPointerDown, onOpenContext,
 }: {
   uid: string
@@ -356,6 +449,8 @@ function PlacedItemView({
   brand: string
   selected: boolean
   dragging: boolean
+  /** false while the measure tool is armed — no grab cursor / selection styling */
+  interactive: boolean
   onPointerDown: (e: ThreeEvent<PointerEvent>, uid: string) => void
   onOpenContext: (e: ThreeEvent<MouseEvent>, uid: string) => void
 }) {
@@ -393,7 +488,7 @@ function PlacedItemView({
         onPointerDown={(e) => onPointerDown(e, uid)}
         onContextMenu={(e) => onOpenContext(e, uid)}
         onPointerOver={() => {
-          document.body.style.cursor = 'grab'
+          if (interactive) document.body.style.cursor = 'grab'
         }}
         onPointerOut={() => {
           document.body.style.cursor = ''
@@ -438,6 +533,10 @@ export default function Scene() {
   const select = usePlanner((s) => s.select)
   const arm = usePlanner((s) => s.arm)
   const openContextMenu = usePlanner((s) => s.openContextMenu)
+  const measureMode = usePlanner((s) => s.measureMode)
+  const measureA = usePlanner((s) => s.measureA)
+  const measureB = usePlanner((s) => s.measureB)
+  const setMeasurePoint = usePlanner((s) => s.setMeasurePoint)
   const { resolvedTheme } = useTheme()
   const dark = resolvedTheme === 'dark'
   const pal = dark ? NIGHT : DAY
@@ -450,6 +549,8 @@ export default function Scene() {
   const rightDown = useRef<{ x: number; y: number } | null>(null)
   const [ghost, setGhost] = useState<{ x: number; z: number } | null>(null)
   const [draggingUid, setDraggingUid] = useState<string | null>(null)
+  /** live cursor point while the measure tool is armed (preview line) */
+  const [measureHover, setMeasureHover] = useState<{ x: number; z: number } | null>(null)
 
   useEffect(() => {
     const up = () => {
@@ -476,6 +577,13 @@ export default function Scene() {
       moveItem(dragUid.current, pt.x, pt.z)
       return
     }
+    if (measureMode) {
+      // only re-render when the cursor moved meaningfully (2 cm)
+      setMeasureHover((prev) =>
+        !prev || Math.abs(prev.x - pt.x) > 0.02 || Math.abs(prev.z - pt.z) > 0.02 ? { x: pt.x, z: pt.z } : prev,
+      )
+      return
+    }
     if (armedId) {
       const p = clampToRoom(pt.x, pt.z, armedId, 0, room)
       setGhost(p)
@@ -494,6 +602,12 @@ export default function Scene() {
     if (!ds) return
     const moved = Math.hypot(e.nativeEvent.clientX - ds.x, e.nativeEvent.clientY - ds.y)
     if (moved > 7) return
+    if (measureMode) {
+      const pt = floorPoint(e)
+      setMeasurePoint(pt)
+      setMeasureHover({ x: pt.x, z: pt.z })
+      return
+    }
     if (armedId) {
       const pt = floorPoint(e)
       addItem(armedId, pt.x, pt.z)
@@ -505,6 +619,7 @@ export default function Scene() {
   }
 
   const onItemDown = (e: ThreeEvent<PointerEvent>, uid: string) => {
+    if (measureMode) return // measure clicks pass through pieces to the floor
     if (armedId) return // let placement pass through
     if (e.nativeEvent.button !== 0) return // right/middle click → context menu, not drag
     e.stopPropagation()
@@ -516,6 +631,7 @@ export default function Scene() {
   }
 
   const onItemContext = (e: ThreeEvent<MouseEvent>, uid: string) => {
+    if (measureMode) return // no context menu while measuring
     e.stopPropagation()
     e.nativeEvent.preventDefault()
     // ignore if this was the end of a right-drag pan
@@ -531,7 +647,7 @@ export default function Scene() {
       dpr={[1, 2]}
       camera={{ position: [11, 8.5, 11], fov: 40, near: 0.1, far: 150 }}
       gl={{ antialias: true }}
-      className="!absolute inset-0"
+      className={`!absolute inset-0${measureMode ? ' cursor-crosshair' : ''}`}
     >
       <color attach="background" args={[pal.bg]} />
       <fog attach="fog" args={[pal.fog, 34, 85]} />
@@ -575,14 +691,19 @@ export default function Scene() {
             key={it.uid}
             {...it}
             brand={brand}
-            selected={selectedUid === it.uid}
+            selected={selectedUid === it.uid && !measureMode}
             dragging={draggingUid === it.uid}
+            interactive={!measureMode}
             onPointerDown={onItemDown}
             onOpenContext={onItemContext}
           />
         ))}
 
         {armedId && ghost && <Ghost id={armedId} x={ghost.x} z={ghost.z} brand={brand} />}
+
+        {measureMode && measureA && (
+          <MeasureGizmo a={measureA} b={measureB} hover={measureHover} />
+        )}
       </Suspense>
 
       <CameraRig

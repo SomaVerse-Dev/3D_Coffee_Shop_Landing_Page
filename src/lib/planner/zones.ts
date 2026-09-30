@@ -90,3 +90,17 @@ export function computeZoneStats(
     return { zone: zn, area, pieces, seats, spend, pctOfFloor: roomArea > 0 ? area / roomArea : 0 }
   })
 }
+
+/**
+ * The placed items whose center falls inside the zone's clipped rect —
+ * used by the per-zone BOM export (same membership rule as the stats card).
+ */
+export function itemsInZone(
+  zone: ZoneDef,
+  items: PlacedItem[],
+  room: RoomSpec,
+): PlacedItem[] {
+  const c = clipZone(zone, room)
+  if (!c) return []
+  return items.filter((it) => it.x >= c.x1 && it.x <= c.x2 && it.z >= c.z1 && it.z <= c.z2)
+}
