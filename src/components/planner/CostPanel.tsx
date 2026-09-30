@@ -41,6 +41,7 @@ function downloadBomCsv(
   projectName: string, templateId: string, areaM2: number, seats: number,
   lines: Array<{ name: string; qty: number; unit: number; total: number; custom?: boolean }>,
   subtotal: number, install: number, contingency: number, total: number, budget: number | null,
+  caps: Array<{ label: string; cap: number; spend: number; status: 'under' | 'close' | 'over' }>,
 ) {
   const esc = (v: string | number) => {
     const s = String(v)
@@ -64,6 +65,14 @@ function downloadBomCsv(
   rows.push(`Contingency (8%),,,${contingency},`)
   rows.push(`Estimated total,,,${total},`)
   if (budget !== null) rows.push(`Budget,,,${budget},`)
+  if (caps.length > 0) {
+    rows.push('')
+    rows.push('Category caps')
+    rows.push('Category,Cap (USD),Spend (USD),Status')
+    for (const c of caps) {
+      rows.push([esc(c.label), c.cap, c.spend, c.status.toUpperCase()].join(','))
+    }
+  }
   const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -83,6 +92,8 @@ export default function CostPanel() {
   const room = usePlanner((s) => s.room)
   const brand = usePlanner((s) => s.brandColor)
   const showFire = usePlanner((s) => s.showFire)
+  const zones = usePlanner((s) => s.zones)
+  const showZones = usePlanner((s) => s.showZones)
   const templateId = usePlanner((s) => s.templateId)
   const projectName = usePlanner((s) => s.projectName)
   const budget = usePlanner((s) => s.budget)
@@ -510,6 +521,12 @@ export default function CostPanel() {
                 downloadBomCsv(
                   projectName, templateId, room.w * room.d, seatCount,
                   cost.lines, cost.subtotal, cost.install, cost.contingency, cost.total, budget,
+                  cappedCats.map((c) => ({
+                    label: CATEGORY_META[c].label,
+                    cap: categoryBudgets[c]!,
+                    spend: catSpend[c],
+                    status: budgetStatusOf(catSpend[c], categoryBudgets[c]!).status,
+                  })),
                 )
               }
             >
@@ -541,6 +558,8 @@ export default function CostPanel() {
           showFire={showFire}
           detailed
           palette={planPalette}
+          zones={zones}
+          showZones={showZones}
         />
       </div>
     </Sheet>

@@ -1,8 +1,9 @@
 'use client'
 
-import type { PlacedItem, RoomSpec } from '@/lib/planner/types'
+import type { PlacedItem, RoomSpec, ZoneDef } from '@/lib/planner/types'
 import { getItem } from '@/lib/planner/catalog'
 import { ALL_CATEGORIES, CATEGORY_META } from '@/lib/planner/capacity'
+import { ZONE_META, drawableZones } from '@/lib/planner/zones'
 
 interface PlanSVGProps {
   room: RoomSpec
@@ -15,6 +16,9 @@ interface PlanSVGProps {
   transparentPaper?: boolean
   /** glyph coloring: brand color everywhere, or one color per furniture category */
   palette?: 'brand' | 'category'
+  /** functional zones (translucent washes + labels) */
+  zones?: ZoneDef[]
+  showZones?: boolean
   refCb?: (el: SVGSVGElement | null) => void
 }
 
@@ -25,12 +29,13 @@ const PATH_GREEN = '#16A34A'
 
 /** 2D architectural plan, coordinates in meters (SVG user units). */
 export default function PlanSVG({
-  room, items, brand, showFire = false, detailed = false, selectedUid = null, className, transparentPaper = false, palette = 'brand', refCb,
+  room, items, brand, showFire = false, detailed = false, selectedUid = null, className, transparentPaper = false, palette = 'brand', zones, showZones = false, refCb,
 }: PlanSVGProps) {
   const { w, d } = room
   const pad = detailed ? 1.15 : 0.55
   const vb = `${-w / 2 - pad} ${-d / 2 - pad} ${w + pad * 2} ${d + pad * 2}`
   const pxPerM = 44
+  const zonesToDraw = showZones ? drawableZones(zones, room) : []
 
   const rearX = w / 4
   const gridLines: React.ReactNode[] = []
@@ -87,6 +92,35 @@ export default function PlanSVG({
           ))}
         </g>
       )}
+
+      {/* functional zones — translucent washes under the glyphs */}
+      {zonesToDraw.map(({ zone: zn, x1, z1, x2, z2 }) => {
+        const color = ZONE_META[zn.kind].color
+        const zw = x2 - x1
+        const zd = z2 - z1
+        const cx = (x1 + x2) / 2
+        const labelY = z1 + Math.min(0.4, zd / 2)
+        return (
+          <g key={zn.id}>
+            <rect
+              x={x1} y={z1} width={zw} height={zd} rx={0.1}
+              fill={color} fillOpacity={0.12}
+              stroke={color} strokeOpacity={0.55} strokeWidth={0.035} strokeDasharray="0.26 0.18"
+            />
+            <text
+              x={cx} y={labelY}
+              textAnchor="middle"
+              fontSize={0.24}
+              fontWeight={700}
+              fill={color}
+              fillOpacity={0.9}
+              style={{ fontFamily: 'ui-sans-serif, system-ui, sans-serif', letterSpacing: '0.12em', textTransform: 'uppercase' }}
+            >
+              {zn.label.toUpperCase()}
+            </text>
+          </g>
+        )
+      })}
 
       {/* items */}
       {items.map((it) => {

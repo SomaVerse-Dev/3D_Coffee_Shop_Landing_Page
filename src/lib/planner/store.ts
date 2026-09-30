@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Category, PlacedItem, RoomSpec, TemplateId, ViewMode } from './types'
+import type { Category, PlacedItem, RoomSpec, TemplateId, ViewMode, ZoneDef } from './types'
 import { makeUid } from './types'
 import { getItem, halfExtents } from './catalog'
 import { TEMPLATES } from './templates'
@@ -35,6 +35,8 @@ export interface LayoutSnapshot {
   brandColor: string
   projectName: string
   templateId: TemplateId | 'custom'
+  /** functional zones (optional so pre-v1.7 snapshots still decode) */
+  zones?: ZoneDef[]
 }
 
 /** A named, device-local checkpoint of the session (undo-safe restore). */
@@ -54,6 +56,9 @@ export type PlanPalette = 'brand' | 'category'
 interface PlannerState {
   room: RoomSpec
   items: PlacedItem[]
+  /** functional zones shown as translucent washes (template-derived, travels with snapshots) */
+  zones: ZoneDef[]
+  showZones: boolean
   brandColor: string
   viewMode: ViewMode
   showFire: boolean
@@ -94,6 +99,7 @@ interface PlannerState {
   requestZoom: (kind: 'in' | 'out' | 'fit') => void
   setViewMode: (m: ViewMode) => void
   toggleFire: () => void
+  toggleZones: () => void
   setCostOpen: (open: boolean) => void
   setPlanOpen: (open: boolean) => void
   setBrandColor: (color: string) => void
@@ -125,7 +131,7 @@ let lastPush: { type: string; t: number } = { type: '', t: 0 }
 
 function snapshotOf(s: {
   room: RoomSpec; items: PlacedItem[]; brandColor: string
-  projectName: string; templateId: TemplateId | 'custom'
+  projectName: string; templateId: TemplateId | 'custom'; zones: ZoneDef[]
 }): LayoutSnapshot {
   return {
     room: { ...s.room },
@@ -133,6 +139,7 @@ function snapshotOf(s: {
     brandColor: s.brandColor,
     projectName: s.projectName,
     templateId: s.templateId,
+    zones: s.zones.map((z) => ({ ...z })),
   }
 }
 
@@ -158,6 +165,8 @@ export const usePlanner = create<PlannerState>()(
     (set, get) => ({
       room: { w: TEMPLATES.cafe.roomW, d: TEMPLATES.cafe.roomD },
       items: TEMPLATES.cafe.items.map((t) => ({ uid: makeUid(), id: t.id, x: t.x, z: t.z, rot: t.rot ?? 0 })),
+      zones: TEMPLATES.cafe.zones ?? [],
+      showZones: true,
       brandColor: TEMPLATES.cafe.brandColor,
       viewMode: '3d',
       showFire: false,
@@ -286,6 +295,7 @@ export const usePlanner = create<PlannerState>()(
 
       setViewMode: (m) => set({ viewMode: m }),
       toggleFire: () => set((s) => ({ showFire: !s.showFire })),
+      toggleZones: () => set((s) => ({ showZones: !s.showZones })),
       setCostOpen: (open) => set({ costOpen: open }),
       setPlanOpen: (open) => set({ planOpen: open }),
       setBrandColor: (color) => {
@@ -338,6 +348,7 @@ export const usePlanner = create<PlannerState>()(
           return {
             room: { w: t.roomW, d: t.roomD },
             items: t.items.map((it) => ({ uid: makeUid(), id: it.id, x: it.x, z: it.z, rot: it.rot ?? 0 })),
+            zones: t.zones ?? [],
             brandColor: t.brandColor,
             projectName: t.projectName,
             templateId: id,
@@ -360,6 +371,7 @@ export const usePlanner = create<PlannerState>()(
         set(() => ({
           room: { ...snap.room },
           items: snap.items.map((i) => ({ ...i, uid: i.uid || makeUid() })),
+          zones: snap.zones ?? [],
           brandColor: snap.brandColor,
           projectName: snap.projectName,
           templateId: snap.templateId,
@@ -380,6 +392,7 @@ export const usePlanner = create<PlannerState>()(
         set(() => ({
           room: { ...prev.room },
           items: prev.items.map((i) => ({ ...i })),
+          zones: prev.zones ?? [],
           brandColor: prev.brandColor,
           projectName: prev.projectName,
           templateId: prev.templateId,
@@ -398,6 +411,7 @@ export const usePlanner = create<PlannerState>()(
         set(() => ({
           room: { ...next.room },
           items: next.items.map((i) => ({ ...i })),
+          zones: next.zones ?? [],
           brandColor: next.brandColor,
           projectName: next.projectName,
           templateId: next.templateId,
@@ -415,6 +429,7 @@ export const usePlanner = create<PlannerState>()(
       partialize: (s) => ({
         room: s.room,
         items: s.items,
+        zones: s.zones,
         brandColor: s.brandColor,
         projectName: s.projectName,
         templateId: s.templateId,

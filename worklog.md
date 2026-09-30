@@ -252,3 +252,37 @@ Stage Summary:
 - Known nits/risks: PNG legend assumes rooms ≥ ~6.5 m wide to fit all five entries on one line (narrower rooms may clip the right-most label; acceptable for current template sizes); palette persists device-local so a shared layout opens with the recipient's last-used palette; caps are advisory only (no hard blocks) by design.
 - Next-round ideas (priority): zone/area tints in plan view (drawn zones, not just glyph colors); layout diff history panel (checkpoint → checkpoint compare); share-link OG cards; per-cap BOM CSV column; drag-from-catalog ghost in plan view; tour step targeting the catalog sheet on mobile.
 - Post-round note: dev server silently died right after the round (same as Round 3's supervisor cycle) — restarted via `nohup bun run dev >> dev.log 2>&1 &`, GET / and /api/layouts verified 200 afterwards.
+
+---
+Task ID: 11
+Agent: Z.ai Code (cron webDevReview)
+Task: Round 7 — QA sweep (desktop+mobile) + functional zones with area tints + share-link OG preview cards + per-cap BOM CSV
+
+Work Log:
+- Status assessment: v1.6 stable (lint 0, GET / 200). agent-browser sweep at 1440×900 + 390×844 re-verified: addItem/undo (32→33→32), 1/2-key swing, fire toggle, mobile 0px overflow, no page errors. No bugs in shipped features → new-feature round (v1.7).
+- Functional zones with area tints (flagship feature):
+  - types.ts: ZoneKind ('service' | 'seating' | 'dining' | 'entry' | 'work' | 'meeting' | 'retail' | 'support') + ZoneDef {id,label,kind,x,z,w,d} + TemplateDef.zones?.
+  - NEW src/lib/planner/zones.ts: ZONE_META (warm muted wash palette: sage/amber/coffee/rust/slate/deep-sage/tan/gray), clipZone() (AABB ∩ room bounds, drops <0.15 m slivers), drawableZones() — zones auto-clip when the room is resized smaller.
+  - templates.ts: hand-tuned zones per template (café 5: Espresso bar/Entry/Window bar/Café floor/Lounge; coworking 5: Open studio/Meeting/Focus booth/Lounge/Entry; boutique 4: Merch floor/Checkout/Fitting/Feature display; restaurant 4: Bar & pass/Host stand/Booths/Dining room).
+  - store.ts: zones: ZoneDef[] state + showZones (session UI default true) + toggleZones; loadTemplate loads template zones; snapshotOf/applySnapshot/undo/redo carry zones (LayoutSnapshot.zones optional for pre-v1.7 compat); partialize persists zones with the layout.
+  - PlanSVG: zones + showZones props — draws clipped translucent washes (12% fill, dashed 55%-alpha outline, rx 0.1) with uppercase letterspaced micro-cap labels pinned to each zone's top edge, under the item glyphs.
+  - Scene.tsx: ZoneWashes 3D floor decals (y 0.0035, renderOrder 1, depthWrite false, opacity 0.13 day / 0.17 night).
+  - Toolbar: compact zones toggle next to Fire safety — LayoutGrid icon + zone-count badge, active state charcoal-tinted, aria-pressed + tooltip; count badge hidden when template has none.
+  - ViewportHud minimap + CostPanel PNG export + ExportModal PDF export all pass zones/showZones (exports match the on-screen toggle; verified PNG shows washes + labels).
+- Share-link OG preview cards (feature):
+  - NEW /s/[code]/page.tsx: server landing for share links — generateMetadata builds title/description/OG+Twitter card tags from the decoded snapshot (project name, venue, m², pieces); humans get an instant `location.replace('/?plan=<code>')` inline script + styled blueprint fallback card (FORMA mark, project meta, pulse dots, "Open the studio" link) for no-JS.
+  - NEW /s/[code]/opengraph-image.tsx: next/og ImageResponse 1200×630 — decodes the code server-side (decodeLayout is pure TS; atob fine on node), renders wordmark + venue chip + project name + stats rows (area/seats/pieces/est. cost in brand color) + a live mini plan (zones as rgba washes, items as brand/ink/beige rounded rects via halfExtents AABB math) on an apron panel. Graceful "broken link" card for invalid codes.
+  - share.ts buildShareUrl now returns /s/<code> (was /?plan=<code>); decodeLayout now passes zones through; Toolbar share toast copy mentions the preview card.
+  - Satori lesson (cost a 500 first render): every multi-child div needs explicit display:flex — the room box (absolute children) initially lacked it; error surfaced as "failed to pipe response … Expected <div> to have explicit display:flex" in dev.log.
+  - E2E: GET /s/<code> → 200 HTML with correct og:title/twitter:card; GET /s/<code>/opengraph-image → 200 image/png 43.5 KB, card inspected (plan renders, stats correct); opening the link in-browser redirects to /?plan=… and applies the layout incl. all 5 zones.
+- Per-cap BOM CSV (feature): downloadBomCsv gains an optional caps section — "Category caps" header + rows Category,Cap (USD),Spend (USD),Status (UNDER/CLOSE/OVER) appended when any cap is set; verified in downloaded CSV ("Seating,2000,3580,OVER").
+- Bug found & fixed during E2E: decodeLayout dropped the new zones field → share links opened with zones silently stripped (symptom: zones:0 after redirect). Fixed with zones passthrough; full share round-trip re-verified (5 zones restored).
+- Styling details: zone labels use 0.12em tracking uppercase micro-caps (blueprint annotation feel); toolbar zones toggle matches the fire-toggle visual family; OG card follows the FORMA paper/ink/apron system; /s landing reuses blueprint-grid + warmwhite tokens.
+- Environment notes: browser cache after dev-server HMR of share.ts required a fresh page load to pick up the module (share code generated in-page for testing); clipboard read is blocked headless — share URL tested via in-page encodeLayout replication + button click.
+- E2E verified (fresh sessions, desktop 1280/1440 + mobile 390): zones visible in 3D (day + night) and minimap with labels; toggle hides/shows everywhere; per-template zones swap on template change (coworking labels verified); PNG export with zone washes + labels inspected; BOM CSV caps section; OG image + meta tags fetched and inspected; share round-trip keeps zones; room-resize zone clipping exercised implicitly via clipZone unit-path; mobile 390 = 0px overflow; console clean; lint 0 errors. QA state restored (café, 32 items, 5 zones, no caps, brand palette, light theme).
+
+Stage Summary:
+- v1.7: functional zones (per-template tinted areas with labels in plan/3D/PNG/PDF, toolbar toggle, snapshot-travelling), /s/<code> share links with dynamic OG preview cards (next/og plan renderer), per-cap BOM CSV section, decodeLayout zones passthrough fix.
+- Files: src/lib/planner/{types.ts, zones.ts (new), templates.ts, store.ts, share.ts}; src/components/planner/{PlanSVG.tsx, Scene.tsx, Toolbar.tsx, ViewportHud.tsx, CostPanel.tsx, ExportModal.tsx}; src/app/s/[code]/{page.tsx, opengraph-image.tsx} (new).
+- Known nits/risks: seeded community rows (pre-v1.7 DB snapshots) have no zones → open without washes (user-shaped data, acceptable); OG mini-plan uses AABBs so rotated items are conservative boxes; OG route first compile takes ~3 s (dev-only); zone labels can sit under tall item clusters in dense layouts (wash is an underlay by design).
+- Next-round ideas (priority): zone editor (draw/move/rename zones for custom layouts); layout diff history panel (checkpoint → checkpoint compare); community gallery OG thumbnails from DB rows via /s-style renderer; per-zone seat/area stats card; tour step targeting the catalog sheet on mobile; /api/layouts?limit param already done in v1.5.

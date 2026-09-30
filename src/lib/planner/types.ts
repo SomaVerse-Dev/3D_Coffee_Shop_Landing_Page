@@ -39,6 +39,29 @@ export interface RoomSpec {
   d: number
 }
 
+/** functional area of the floor plan (drawn as a translucent wash + label) */
+export type ZoneKind =
+  | 'service'   // counters, checkout, pass
+  | 'seating'   // loose chairs & lounge
+  | 'dining'    // table service areas
+  | 'entry'     // arrival / host
+  | 'work'      // desks / focus
+  | 'meeting'   // meeting spots
+  | 'retail'    // merch display
+  | 'support'   // fitting, phone booth, back-of-house
+
+export interface ZoneDef {
+  id: string
+  label: string
+  kind: ZoneKind
+  /** center x in meters (room coords, 0 = middle) */
+  x: number
+  /** center z in meters */
+  z: number
+  w: number
+  d: number
+}
+
 export interface TemplateDef {
   id: TemplateId
   name: string
@@ -48,6 +71,8 @@ export interface TemplateDef {
   brandColor: string
   projectName: string
   items: Array<{ id: string; x: number; z: number; rot?: number }>
+  /** functional zones drawn under the plan glyphs */
+  zones?: ZoneDef[]
 }
 
 let uidCounter = 0

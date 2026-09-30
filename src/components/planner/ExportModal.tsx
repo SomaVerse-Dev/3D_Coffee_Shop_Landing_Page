@@ -27,6 +27,8 @@ export default function ExportModal({ open, onOpenChange }: { open: boolean; onO
   const items = usePlanner((s) => s.items)
   const brand = usePlanner((s) => s.brandColor)
   const showFire = usePlanner((s) => s.showFire)
+  const zones = usePlanner((s) => s.zones)
+  const showZones = usePlanner((s) => s.showZones)
   const templateId = usePlanner((s) => s.templateId)
   const projectName = usePlanner((s) => s.projectName)
   const setProjectName = usePlanner((s) => s.setProjectName)
@@ -278,6 +280,8 @@ export default function ExportModal({ open, onOpenChange }: { open: boolean; onO
             brand={brand}
             showFire={showFire}
             detailed
+            zones={zones}
+            showZones={showZones}
           />
         </div>
       </DialogContent>

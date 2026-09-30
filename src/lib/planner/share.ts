@@ -30,6 +30,7 @@ export function decodeLayout(code: string): LayoutSnapshot | null {
       brandColor: typeof raw.brandColor === 'string' ? raw.brandColor : '#C05B2E',
       projectName: typeof raw.projectName === 'string' ? raw.projectName : 'Shared plan',
       templateId: (raw.templateId as TemplateId | 'custom') ?? 'custom',
+      zones: Array.isArray(raw.zones) ? raw.zones : [],
     }
   } catch {
     return null
@@ -38,9 +39,10 @@ export function decodeLayout(code: string): LayoutSnapshot | null {
 
 export function buildShareUrl(s: LayoutSnapshot): string {
   const code = encodeLayout(s)
+  // /s/<code> serves OG preview cards for chat apps, then redirects into /?plan=<code>
   const url = new URL(window.location.href)
   url.search = ''
   url.hash = ''
-  url.searchParams.set('plan', code)
+  url.pathname = `/s/${code}`
   return url.toString()
 }

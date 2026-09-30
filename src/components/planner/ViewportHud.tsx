@@ -149,6 +149,8 @@ export function PlanMinimap() {
   const items = usePlanner((s) => s.items)
   const brand = usePlanner((s) => s.brandColor)
   const showFire = usePlanner((s) => s.showFire)
+  const zones = usePlanner((s) => s.zones)
+  const showZones = usePlanner((s) => s.showZones)
   const selectedUid = usePlanner((s) => s.selectedUid)
   const planOpen = usePlanner((s) => s.planOpen)
   const setPlanOpen = usePlanner((s) => s.setPlanOpen)
@@ -177,6 +179,8 @@ export function PlanMinimap() {
             showFire={showFire}
             selectedUid={selectedUid}
             palette={planPalette}
+            zones={zones}
+            showZones={showZones}
             className="block h-auto w-full"
           />
         </div>

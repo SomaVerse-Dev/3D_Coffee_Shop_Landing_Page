@@ -9,6 +9,7 @@ import { damp, damp3 } from 'maath/easing'
 import { usePlanner, clampToRoom } from '@/lib/planner/store'
 import { getItem, halfExtents } from '@/lib/planner/catalog'
 import { egressRoutes } from '@/lib/planner/egress'
+import { ZONE_META, drawableZones } from '@/lib/planner/zones'
 import { ItemModel } from './furniture'
 
 const WALL_H = 2.5
@@ -59,6 +60,29 @@ function floorPoint(e: ThreeEvent<PointerEvent | MouseEvent>): { x: number; z: n
     x: e.ray.origin.x + e.ray.direction.x * t,
     z: e.ray.origin.z + e.ray.direction.z * t,
   }
+}
+
+function ZoneWashes({ zones, dark }: { zones: ReturnType<typeof drawableZones>; dark: boolean }) {
+  return (
+    <group>
+      {zones.map(({ zone: zn, x1, z1, x2, z2 }) => (
+        <mesh
+          key={zn.id}
+          position={[(x1 + x2) / 2, 0.0035, (z1 + z2) / 2]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          renderOrder={1}
+        >
+          <planeGeometry args={[x2 - x1, z2 - z1]} />
+          <meshBasicMaterial
+            color={ZONE_META[zn.kind].color}
+            transparent
+            opacity={dark ? 0.17 : 0.13}
+            depthWrite={false}
+          />
+        </mesh>
+      ))}
+    </group>
+  )
 }
 
 // ─── Camera rig: smooth swing between plan and 3D + zoom requests ─────────
@@ -405,6 +429,8 @@ export default function Scene() {
   const brand = usePlanner((s) => s.brandColor)
   const viewMode = usePlanner((s) => s.viewMode)
   const showFire = usePlanner((s) => s.showFire)
+  const zones = usePlanner((s) => s.zones)
+  const showZones = usePlanner((s) => s.showZones)
   const armedId = usePlanner((s) => s.armedId)
   const selectedUid = usePlanner((s) => s.selectedUid)
   const addItem = usePlanner((s) => s.addItem)
@@ -528,6 +554,7 @@ export default function Scene() {
 
       <Suspense fallback={null}>
         <Room w={room.w} d={room.d} showFire={showFire} pal={pal} />
+        {showZones && <ZoneWashes zones={drawableZones(zones, room)} dark={dark} />}
         {showFire && <EgressPaths w={room.w} d={room.d} />}
 
         {/* interaction ground */}

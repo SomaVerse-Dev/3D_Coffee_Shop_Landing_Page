@@ -1,7 +1,10 @@
-import type { TemplateDef } from './types'
+import type { TemplateDef, ZoneDef } from './types'
 
 /** quarter-turn helper: 0 = face south(+z), 1 = east(+x), 2 = north(-z), -1 = west(-x) */
 const R = (q: number) => (q * Math.PI) / 2
+
+const zone = (id: string, label: string, kind: ZoneDef['kind'], x: number, z: number, w: number, d: number): ZoneDef =>
+  ({ id, label, kind, x, z, w, d })
 
 function chairs4(tx: number, tz: number, gapZ = 0.75, gapX = 1.05) {
   return [
@@ -55,6 +58,13 @@ export const TEMPLATES: Record<'cafe' | 'coworking' | 'boutique' | 'restaurant',
       { id: 'pendant', x: 0.9, z: -0.2, rot: 0 },
       { id: 'pendant', x: 3.6, z: 0.4, rot: 0 },
     ],
+    zones: [
+      zone('cafe-service', 'Espresso bar', 'service', -1.5, -3.3, 5.4, 1.6),
+      zone('cafe-entry', 'Entry', 'entry', 0, 3.3, 2.4, 1.2),
+      zone('cafe-window', 'Window bar', 'seating', 2.6, 3.4, 2.6, 1.1),
+      zone('cafe-floor', 'Café floor', 'seating', 1.0, 0.4, 6.8, 3.6),
+      zone('cafe-lounge', 'Lounge', 'seating', -3.9, 1.8, 2.0, 3.6),
+    ],
   },
 
   coworking: {
@@ -92,6 +102,13 @@ export const TEMPLATES: Record<'cafe' | 'coworking' | 'boutique' | 'restaurant',
       { id: 'pendant', x: 4.0, z: -2.3, rot: 0 },
       { id: 'pendant', x: 0.2, z: 1.6, rot: 0 },
     ],
+    zones: [
+      zone('cw-desks', 'Open studio', 'work', 0.3, -2.3, 9.8, 2.8),
+      zone('cw-meeting', 'Meeting', 'meeting', 0.2, 1.6, 4.4, 2.8),
+      zone('cw-focus', 'Focus booth', 'support', 5.35, -3.85, 1.4, 1.4),
+      zone('cw-lounge', 'Lounge', 'seating', -4.7, 3.3, 2.6, 2.6),
+      zone('cw-entry', 'Entry', 'entry', 0, 3.7, 2.2, 1.2),
+    ],
   },
 
   boutique: {
@@ -123,6 +140,12 @@ export const TEMPLATES: Record<'cafe' | 'coworking' | 'boutique' | 'restaurant',
       { id: 'plant', x: -4.2, z: 2.9, rot: 0 },
       { id: 'pendant', x: -0.9, z: 1.5, rot: 0 },
       { id: 'pendant', x: 2.3, z: 1.6, rot: 0 },
+    ],
+    zones: [
+      zone('btl-merch', 'Merch floor', 'retail', -0.9, -0.4, 6.4, 4.6),
+      zone('btl-checkout', 'Checkout', 'service', 3.45, -3.05, 2.1, 1.7),
+      zone('btl-fitting', 'Fitting', 'support', 4.25, -1.4, 1.3, 2.6),
+      zone('btl-display', 'Feature display', 'retail', -2.5, 2.0, 3.4, 2.2),
     ],
   },
 
@@ -160,6 +183,12 @@ export const TEMPLATES: Record<'cafe' | 'coworking' | 'boutique' | 'restaurant',
       { id: 'pendant', x: -1.7, z: 1.3, rot: 0 },
       { id: 'pendant', x: 1.5, z: 1.3, rot: 0 },
       { id: 'pendant', x: 4.0, z: 1.6, rot: 0 },
+    ],
+    zones: [
+      zone('bst-bar', 'Bar & pass', 'service', 1.0, -4.0, 3.6, 1.8),
+      zone('bst-entry', 'Host stand', 'entry', 0.9, 3.9, 2.2, 1.5),
+      zone('bst-booths', 'Booths', 'dining', -4.85, 0, 1.9, 6.6),
+      zone('bst-floor', 'Dining room', 'dining', 1.2, 0.4, 8.2, 4.8),
     ],
   },
 }

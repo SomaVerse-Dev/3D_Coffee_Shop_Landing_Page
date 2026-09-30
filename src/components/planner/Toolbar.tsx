@@ -1,6 +1,6 @@
 'use client'
 
-import { Box, Calculator, CircleHelp, DoorOpen, FileDown, Keyboard, LayoutTemplate, Link2, Map, Redo2, Ruler, SwatchBook, TriangleAlert, Undo2 } from 'lucide-react'
+import { Box, Calculator, CircleHelp, DoorOpen, FileDown, Keyboard, LayoutGrid, LayoutTemplate, Link2, Map, Redo2, Ruler, SwatchBook, TriangleAlert, Undo2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -36,6 +36,9 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
   const setViewMode = usePlanner((s) => s.setViewMode)
   const showFire = usePlanner((s) => s.showFire)
   const toggleFire = usePlanner((s) => s.toggleFire)
+  const showZones = usePlanner((s) => s.showZones)
+  const toggleZones = usePlanner((s) => s.toggleZones)
+  const zonesCount = usePlanner((s) => s.zones.length)
   const brandColor = usePlanner((s) => s.brandColor)
   const setBrandColor = usePlanner((s) => s.setBrandColor)
   const items = usePlanner((s) => s.items)
@@ -62,7 +65,7 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
     const url = buildShareUrl(getSnapshot())
     void navigator.clipboard
       .writeText(url)
-      .then(() => toast({ title: 'Share link copied', description: 'Anyone with the link sees this exact layout.' }))
+      .then(() => toast({ title: 'Share link copied', description: 'Chat apps show a live preview card; anyone opening it lands in this exact layout.' }))
       .catch(() => toast({ title: url, description: 'Copy this link to share the layout.' }))
   }
 
@@ -186,6 +189,39 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
           <span className="hidden text-xs font-medium text-stone-600 2xl:inline">Fire safety</span>
           <Switch checked={showFire} onCheckedChange={toggleFire} aria-label="Show fire safety egress" />
         </label>
+
+        {/* functional zones */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={toggleZones}
+              aria-pressed={showZones}
+              aria-label={showZones ? 'Hide zone areas' : 'Show zone areas'}
+              title={showZones ? 'Hide zone areas' : 'Show zone areas'}
+              className={cn(
+                'flex h-9 items-center gap-1.5 rounded-lg border px-2.5 shadow-xs transition-all duration-150',
+                showZones
+                  ? 'border-charcoal/30 bg-charcoal/[0.06] text-charcoal'
+                  : 'border-stone-300/80 bg-white text-stone-400 hover:border-stone-400/70 hover:text-charcoal',
+              )}
+            >
+              <LayoutGrid className={cn('h-4 w-4 transition-colors', showZones && 'text-charcoal')} />
+              {zonesCount > 0 && (
+                <span
+                  className={cn(
+                    'min-w-4 rounded-full px-1 text-[9.5px] font-bold tabular-nums leading-4',
+                    showZones ? 'bg-charcoal text-warmwhite' : 'bg-stone-200 text-stone-500',
+                  )}
+                >
+                  {zonesCount}
+                </span>
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">
+            {showZones ? 'Zone areas on — click to hide the washes' : 'Zone areas off — show service / seating washes'}
+          </TooltipContent>
+        </Tooltip>
 
         {/* brand color */}
         <Popover>
