@@ -78,6 +78,124 @@ function feetInches(m: number): string {
 }
 
 const MEASURE_INK = '#2E2B26'
+const AREA_FILL = '#16A34A'
+
+/** polygon area via the shoelace formula (meters → m²) */
+function polygonArea(pts: Array<{ x: number; z: number }>): number {
+  let a = 0
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i]
+    const q = pts[(i + 1) % pts.length]
+    a += p.x * q.z - q.x * p.z
+  }
+  return Math.abs(a) / 2
+}
+
+/** polygon centroid (for the area label) — falls back to the vertex average */
+function polygonCentroid(pts: Array<{ x: number; z: number }>): { x: number; z: number } {
+  let a = 0
+  let cx = 0
+  let cz = 0
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i]
+    const q = pts[(i + 1) % pts.length]
+    const cross = p.x * q.z - q.x * p.z
+    a += cross
+    cx += (p.x + q.x) * cross
+    cz += (p.z + q.z) * cross
+  }
+  if (Math.abs(a) < 1e-6) {
+    const n = pts.length || 1
+    return { x: pts.reduce((s, p) => s + p.x, 0) / n, z: pts.reduce((s, p) => s + p.z, 0) / n }
+  }
+  return { x: cx / (3 * a), z: cz / (3 * a) }
+}
+
+/** square meters → square feet string, e.g. 4.8 m² → 51.7 ft² */
+function sqFeet(sqM: number): string {
+  return `${(sqM * 10.7639).toFixed(1)} ft²`
+}
+
+/**
+ * The area-measure overlay: a live polygon with a translucent fill, solid
+ * committed edges, a dashed rubber edge to the cursor and a floating m² label.
+ */
+function AreaGizmo({
+  pts, hover, closed,
+}: {
+  pts: Array<{ x: number; z: number }>
+  hover: { x: number; z: number } | null
+  closed: boolean
+}) {
+  const canClose = pts.length >= 3
+  // while open, the last edge follows the cursor (unless the cursor sits on the start point)
+  const snapping = !closed && canClose && hover && Math.hypot(hover.x - pts[0].x, hover.z - pts[0].z) < 0.25
+  const cursor = !closed && hover && !snapping ? hover : null
+
+  const loop = useMemo(() => {
+    const out: Array<[number, number, number]> = pts.map((p) => [p.x, 0.025, p.z])
+    if (cursor) out.push([cursor.x, 0.025, cursor.z])
+    return out
+  }, [pts, cursor])
+
+  const fillMesh = useMemo(() => {
+    if (!closed || pts.length < 3) return null
+    const shape = new THREE.Shape(pts.map((p) => new THREE.Vector2(p.x, p.z)))
+    const geo = new THREE.ShapeGeometry(shape)
+    geo.rotateX(-Math.PI / 2)
+    return geo
+  }, [closed, pts])
+
+  const area = canClose ? polygonArea(pts) : 0
+  const centroid = canClose ? polygonCentroid(pts) : null
+
+  return (
+    <group renderOrder={3}>
+      {fillMesh && (
+        <mesh geometry={fillMesh} position={[0, 0.018, 0]} renderOrder={2}>
+          <meshBasicMaterial color={AREA_FILL} transparent opacity={0.16} depthWrite={false} side={THREE.DoubleSide} />
+        </mesh>
+      )}
+      {loop.length >= 2 && (
+        <Line
+          points={closed ? pts.map((p) => [p.x, 0.025, p.z] as [number, number, number]) : loop}
+          color={snapping || closed ? AREA_FILL : MEASURE_INK}
+          lineWidth={2}
+          dashed={!closed && !snapping}
+          dashSize={0.14}
+          gapSize={0.1}
+          transparent
+          opacity={closed ? 0.95 : 0.8}
+          renderOrder={3}
+        />
+      )}
+      {pts.map((p, i) => (
+        <MeasureMarker key={i} x={p.x} z={p.z} color={closed ? AREA_FILL : MEASURE_INK} />
+      ))}
+      {centroid && area > 0.05 && (
+        <Html position={[centroid.x, 0.05, centroid.z]} center style={{ pointerEvents: 'none' }} zIndexRange={[30, 0]}>
+          <div
+            className="flex items-center gap-1.5 whitespace-nowrap rounded-full bg-charcoal/92 px-2.5 py-1 shadow-md ring-1 ring-white/20"
+            data-testid="area-label"
+          >
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{ backgroundColor: closed ? '#4ADE80' : '#D6D3D1' }}
+              aria-hidden
+            />
+            <span className="font-display text-[11.5px] font-bold tabular-nums leading-none text-warmwhite">
+              {area.toFixed(2)} m²
+            </span>
+            <span className="text-[9.5px] font-medium tabular-nums leading-none text-stone-300">
+              {sqFeet(area)}
+            </span>
+            {!closed && <span className="text-[9.5px] font-medium leading-none text-stone-400">· Enter to close</span>}
+          </div>
+        </Html>
+      )}
+    </group>
+  )
+}
 
 function MeasureMarker({ x, z, color }: { x: number; z: number; color: string }) {
   return (
@@ -438,7 +556,7 @@ function EgressPaths({ w, d }: { w: number; d: number }) {
 // ─── Placed items with drag support ────────────────────────────────────────
 
 function PlacedItemView({
-  uid, id, x, z, rot, brand, selected, dragging, interactive,
+  uid, id, x, z, rot, brand, selected, primary, dragging, interactive,
   onPointerDown, onOpenContext,
 }: {
   uid: string
@@ -447,7 +565,10 @@ function PlacedItemView({
   z: number
   rot: number
   brand: string
+  /** member of the current selection (single or multi) */
   selected: boolean
+  /** the anchor piece of a multi-selection (breathing brand ring) */
+  primary: boolean
   dragging: boolean
   /** false while the measure tool is armed — no grab cursor / selection styling */
   interactive: boolean
@@ -458,8 +579,8 @@ function PlacedItemView({
   const ringRef = useRef<THREE.Mesh>(null)
   useFrame((_, dt) => {
     if (groupRef.current) damp(groupRef.current.rotation, 'y', rot, 0.16, dt)
-    // selected ring gently breathes so the selection feels alive
-    if (ringRef.current && selected) {
+    // primary ring gently breathes so the selection feels alive
+    if (ringRef.current && primary) {
       const s = 1 + Math.sin(performance.now() * 0.004) * 0.025
       ringRef.current.scale.setScalar(s)
     }
@@ -471,9 +592,13 @@ function PlacedItemView({
   return (
     <>
       {selected && (
-        <mesh ref={ringRef} rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.014, z]}>
-          <ringGeometry args={[ringR, ringR + 0.06, 44]} />
-          <meshBasicMaterial color={brand} transparent opacity={0.85} />
+        <mesh
+          ref={primary ? ringRef : undefined}
+          rotation={[-Math.PI / 2, 0, 0]}
+          position={[x, 0.014, z]}
+        >
+          <ringGeometry args={primary ? [ringR, ringR + 0.06, 44] : [ringR, ringR + 0.045, 40]} />
+          <meshBasicMaterial color={primary ? brand : '#57534E'} transparent opacity={primary ? 0.85 : 0.75} />
         </mesh>
       )}
       {(dragging || selected) && cat && (
@@ -528,15 +653,22 @@ export default function Scene() {
   const showZones = usePlanner((s) => s.showZones)
   const armedId = usePlanner((s) => s.armedId)
   const selectedUid = usePlanner((s) => s.selectedUid)
+  const selectedUids = usePlanner((s) => s.selectedUids)
   const addItem = usePlanner((s) => s.addItem)
-  const moveItem = usePlanner((s) => s.moveItem)
+  const dragItems = usePlanner((s) => s.dragItems)
   const select = usePlanner((s) => s.select)
+  const setPrimary = usePlanner((s) => s.setPrimary)
+  const toggleSelect = usePlanner((s) => s.toggleSelect)
   const arm = usePlanner((s) => s.arm)
   const openContextMenu = usePlanner((s) => s.openContextMenu)
   const measureMode = usePlanner((s) => s.measureMode)
   const measureA = usePlanner((s) => s.measureA)
   const measureB = usePlanner((s) => s.measureB)
+  const measureTarget = usePlanner((s) => s.measureTarget)
+  const areaPts = usePlanner((s) => s.areaPts)
+  const areaClosed = usePlanner((s) => s.areaClosed)
   const setMeasurePoint = usePlanner((s) => s.setMeasurePoint)
+  const addAreaPt = usePlanner((s) => s.addAreaPt)
   const { resolvedTheme } = useTheme()
   const dark = resolvedTheme === 'dark'
   const pal = dark ? NIGHT : DAY
@@ -547,14 +679,20 @@ export default function Scene() {
   const downScreen = useRef<{ x: number; y: number } | null>(null)
   /** where the right-button went down, so a right-drag pan doesn't open the menu */
   const rightDown = useRef<{ x: number; y: number } | null>(null)
+  /** drag-start positions for every piece in the moving group (grab-offset preserved) */
+  const dragStarts = useRef<Array<{ uid: string; x: number; z: number }>>([])
+  /** floor point under the pointer at drag start (delta source) */
+  const dragOrigin = useRef<{ x: number; z: number } | null>(null)
   const [ghost, setGhost] = useState<{ x: number; z: number } | null>(null)
   const [draggingUid, setDraggingUid] = useState<string | null>(null)
-  /** live cursor point while the measure tool is armed (preview line) */
+  /** live cursor point while the measure tool is armed (preview line/edge) */
   const [measureHover, setMeasureHover] = useState<{ x: number; z: number } | null>(null)
 
   useEffect(() => {
     const up = () => {
       dragUid.current = null
+      dragStarts.current = []
+      dragOrigin.current = null
       setDraggingUid(null)
       downScreen.current = null
       if (controlsRef.current) controlsRef.current.enabled = true
@@ -573,8 +711,9 @@ export default function Scene() {
 
   const onGroundMove = (e: ThreeEvent<PointerEvent>) => {
     const pt = floorPoint(e)
-    if (dragUid.current) {
-      moveItem(dragUid.current, pt.x, pt.z)
+    if (dragUid.current && dragOrigin.current && dragStarts.current.length > 0) {
+      // whole-group delta from the drag origin; each piece keeps its grab offset
+      dragItems(dragStarts.current, pt.x - dragOrigin.current.x, pt.z - dragOrigin.current.z)
       return
     }
     if (measureMode) {
@@ -595,6 +734,8 @@ export default function Scene() {
     downScreen.current = null
     if (dragUid.current) {
       dragUid.current = null
+      dragStarts.current = []
+      dragOrigin.current = null
       setDraggingUid(null)
       if (controlsRef.current) controlsRef.current.enabled = true
       return
@@ -604,7 +745,8 @@ export default function Scene() {
     if (moved > 7) return
     if (measureMode) {
       const pt = floorPoint(e)
-      setMeasurePoint(pt)
+      if (measureTarget === 'area') addAreaPt(pt)
+      else setMeasurePoint(pt)
       setMeasureHover({ x: pt.x, z: pt.z })
       return
     }
@@ -622,9 +764,23 @@ export default function Scene() {
     if (measureMode) return // measure clicks pass through pieces to the floor
     if (armedId) return // let placement pass through
     if (e.nativeEvent.button !== 0) return // right/middle click → context menu, not drag
+    // Shift+Click toggles membership in the multi-selection (no drag)
+    if (e.nativeEvent.shiftKey || e.nativeEvent.metaKey || e.nativeEvent.ctrlKey) {
+      e.stopPropagation()
+      toggleSelect(uid)
+      return
+    }
     e.stopPropagation()
-    select(uid)
+    // clicking a member of a multi-selection moves the whole group (re-anchor only);
+    // clicking elsewhere starts a single selection with grab-offset preserved
+    const isMember = selectedUids.includes(uid)
+    if (isMember) setPrimary(uid)
+    else select(uid)
     dragUid.current = uid
+    dragStarts.current = items
+      .filter((i) => (isMember ? selectedUids : [uid]).includes(i.uid))
+      .map((i) => ({ uid: i.uid, x: i.x, z: i.z }))
+    dragOrigin.current = floorPoint(e)
     setDraggingUid(uid)
     downScreen.current = null
     if (controlsRef.current) controlsRef.current.enabled = false
@@ -691,7 +847,8 @@ export default function Scene() {
             key={it.uid}
             {...it}
             brand={brand}
-            selected={selectedUid === it.uid && !measureMode}
+            selected={selectedUids.includes(it.uid) && !measureMode}
+            primary={selectedUid === it.uid && !measureMode}
             dragging={draggingUid === it.uid}
             interactive={!measureMode}
             onPointerDown={onItemDown}
@@ -701,8 +858,11 @@ export default function Scene() {
 
         {armedId && ghost && <Ghost id={armedId} x={ghost.x} z={ghost.z} brand={brand} />}
 
-        {measureMode && measureA && (
+        {measureMode && measureTarget === 'distance' && measureA && (
           <MeasureGizmo a={measureA} b={measureB} hover={measureHover} />
+        )}
+        {measureMode && measureTarget === 'area' && areaPts.length > 0 && (
+          <AreaGizmo pts={areaPts} hover={measureHover} closed={areaClosed} />
         )}
       </Suspense>
 

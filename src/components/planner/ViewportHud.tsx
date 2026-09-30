@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { BadgeDollarSign, ChevronDown, ChevronUp, Copy, Palette, RotateCw, Trash2, MousePointerClick } from 'lucide-react'
+import { AlignCenterHorizontal, AlignCenterVertical, BadgeDollarSign, ChevronDown, ChevronUp, Copy, Palette, RotateCw, Trash2, MousePointerClick, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -14,13 +14,100 @@ import { cn } from '@/lib/utils'
 export function HintChip() {
   const armedId = usePlanner((s) => s.armedId)
   const selectedUid = usePlanner((s) => s.selectedUid)
+  const multiCount = usePlanner((s) => s.selectedUids.length)
   let text = 'Pick furniture from the library, then click the floor to place it.'
   if (armedId) text = 'Click the floor to place · Esc to cancel'
-  else if (selectedUid) text = 'Drag to move · arrows nudge · R rotate · D duplicate · right-click for actions'
+  else if (multiCount > 1) text = 'Drag moves the whole group · R rotate · D duplicate · Del remove'
+  else if (selectedUid) text = 'Drag to move · arrows nudge · Shift+Click adds to the selection · right-click for actions'
   return (
     <div className="chip-glass pointer-events-none flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[11px] font-medium text-stone-600">
       <MousePointerClick className="h-3.5 w-3.5 shrink-0 text-stone-400" />
       <span className="truncate">{text}</span>
+    </div>
+  )
+}
+
+/**
+ * HUD panel shown while 2+ pieces are selected: group price, align on X/Z,
+ * group rotate / duplicate / delete and a clear button — all in one undo step each.
+ */
+export function GroupSelectionControls() {
+  const selectedUids = usePlanner((s) => s.selectedUids)
+  const selectedUid = usePlanner((s) => s.selectedUid)
+  const items = usePlanner((s) => s.items)
+  const rotateItems = usePlanner((s) => s.rotateItems)
+  const removeItems = usePlanner((s) => s.removeItems)
+  const duplicateItems = usePlanner((s) => s.duplicateItems)
+  const alignItems = usePlanner((s) => s.alignItems)
+  const select = usePlanner((s) => s.select)
+
+  if (selectedUids.length < 2) return null
+  const wanted = new Set(selectedUids)
+  const sel = items.filter((i) => wanted.has(i.uid))
+  const total = sel.reduce((sum, i) => {
+    const cat = getItem(i.id)
+    return sum + (cat ? (i.price ?? cat.price) : 0)
+  }, 0)
+  const seats = sel.reduce((sum, i) => sum + (getItem(i.id)?.seats ?? 0), 0)
+
+  return (
+    <div
+      className="card-glass pointer-events-auto flex items-center gap-1 rounded-xl p-1.5 pl-3.5"
+      role="toolbar"
+      aria-label={`Group actions for ${selectedUids.length} selected pieces`}
+    >
+      <div className="mr-1 text-xs leading-tight">
+        <span className="font-semibold text-charcoal">
+          {selectedUids.length} pieces
+        </span>
+        <span className="ml-1.5 tabular-nums text-stone-400">{fmtMoney(total)}</span>
+        {seats > 0 && (
+          <span className="ml-1 hidden whitespace-nowrap text-[10px] font-medium text-stone-400 xl:inline">
+            · {seats} seats
+          </span>
+        )}
+      </div>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8"
+        title="Align on X — line up left/right with the anchor piece"
+        aria-label="Align selected pieces on X"
+        onClick={() => alignItems(selectedUids, 'x')}
+      >
+        <AlignCenterVertical className="h-4 w-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8"
+        title="Align on Z — line up front/back with the anchor piece"
+        aria-label="Align selected pieces on Z"
+        onClick={() => alignItems(selectedUids, 'z')}
+      >
+        <AlignCenterHorizontal className="h-4 w-4" />
+      </Button>
+      <Button variant="ghost" size="icon" className="h-8 w-8" title="Rotate group 90° (R)" aria-label="Rotate group 90 degrees" onClick={() => rotateItems(selectedUids)}>
+        <RotateCw className="h-4 w-4" />
+      </Button>
+      <Button variant="ghost" size="icon" className="h-8 w-8" title="Duplicate group (D)" aria-label="Duplicate group" onClick={() => duplicateItems(selectedUids)}>
+        <Copy className="h-4 w-4" />
+      </Button>
+      <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600 hover:bg-red-50 hover:text-red-700" title="Delete group (Del)" aria-label="Delete group" onClick={() => removeItems(selectedUids)}>
+        <Trash2 className="h-4 w-4" />
+      </Button>
+      <span className="mx-0.5 h-5 w-px bg-stone-200" aria-hidden />
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8"
+        title="Clear selection (Esc)"
+        aria-label="Clear selection"
+        onClick={() => select(null)}
+      >
+        <X className="h-4 w-4" />
+      </Button>
+      <span className="sr-only">Anchor piece: {selectedUid ? 'last clicked' : 'none'}</span>
     </div>
   )
 }
@@ -152,6 +239,7 @@ export function PlanMinimap() {
   const zones = usePlanner((s) => s.zones)
   const showZones = usePlanner((s) => s.showZones)
   const selectedUid = usePlanner((s) => s.selectedUid)
+  const selectedUids = usePlanner((s) => s.selectedUids)
   const planOpen = usePlanner((s) => s.planOpen)
   const setPlanOpen = usePlanner((s) => s.setPlanOpen)
   const planPalette = usePlanner((s) => s.planPalette)
@@ -178,6 +266,7 @@ export function PlanMinimap() {
             brand={brand}
             showFire={showFire}
             selectedUid={selectedUid}
+            selectedUids={selectedUids}
             palette={planPalette}
             zones={zones}
             showZones={showZones}
@@ -186,7 +275,14 @@ export function PlanMinimap() {
         </div>
         <div className="mt-2 space-y-1.5">
           <div className="flex items-center justify-between text-[10px] font-medium tabular-nums text-stone-400">
-            <span>{items.length} items placed</span>
+            <span>
+              {items.length} items placed
+              {selectedUids.length > 1 && (
+                <span className="ml-1.5 rounded-full bg-charcoal px-1.5 py-px text-[9px] font-bold text-warmwhite">
+                  {selectedUids.length} selected
+                </span>
+              )}
+            </span>
             <span className="inline-flex items-center gap-1">
               <span className="h-1 w-1 rounded-full bg-emerald-500" aria-hidden />
               live plan

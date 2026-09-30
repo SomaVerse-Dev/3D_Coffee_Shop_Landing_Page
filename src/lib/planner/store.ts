@@ -108,6 +108,14 @@ interface PlannerState {
   measureMode: boolean
   measureA: { x: number; z: number } | null
   measureB: { x: number; z: number } | null
+  /** measure tool target: straight distance or polygon area */
+  measureTarget: 'distance' | 'area'
+  /** area mode: polygon vertices sampled so far (session-only) */
+  areaPts: Array<{ x: number; z: number }>
+  /** area mode: polygon closed (area committed — next click starts a new polygon) */
+  areaClosed: boolean
+  /** multi-selection: every selected uid (session-only). selectedUid is the primary/anchor. */
+  selectedUids: string[]
 
   setRoom: (w: number, d: number) => void
   /** create a functional zone (defaults to a 3×2 m rect at room center); returns the new zone */
@@ -123,9 +131,27 @@ interface PlannerState {
   rotateItem: (uid: string) => void
   removeItem: (uid: string) => void
   duplicateItem: (uid: string) => void
+  /** group ops — one undo step per action, positions clamped to the room */
+  removeItems: (uids: string[]) => void
+  duplicateItems: (uids: string[]) => void
+  rotateItems: (uids: string[]) => void
+  /** nudge every selected piece by (dx, dz) meters */
+  nudgeItems: (uids: string[], dx: number, dz: number) => void
+  /** drag support: set each item's position from its drag-start plus the live delta */
+  dragItems: (starts: Array<{ uid: string; x: number; z: number }>, dx: number, dz: number) => void
+  /** align every selected piece on one axis to the primary selection's coordinate */
+  alignItems: (uids: string[], axis: 'x' | 'z') => void
   /** override the catalog price for one placed item (null = back to list price) */
   setItemPrice: (uid: string, price: number | null) => void
   select: (uid: string | null) => void
+  /** re-anchor the primary piece without touching the multi-selection (group drag) */
+  setPrimary: (uid: string) => void
+  /** toggle one item's membership in the multi-selection (Shift+Click) */
+  toggleSelect: (uid: string) => void
+  /** replace the selection with a specific set (primary = first uid) */
+  selectMany: (uids: string[]) => void
+  /** select every placed item (Ctrl+A) */
+  selectAll: () => void
   arm: (catalogId: string | null) => void
   openContextMenu: (uid: string, x: number, y: number) => void
   closeContextMenu: () => void
@@ -138,6 +164,14 @@ interface PlannerState {
   setMeasurePoint: (p: { x: number; z: number }) => void
   /** clear the sampled measure points (tool stays armed) */
   clearMeasure: () => void
+  /** switch the measure tool between distance and area mode (clears samples) */
+  setMeasureTarget: (t: 'distance' | 'area') => void
+  /** area mode: add a polygon vertex (or close the polygon when clicking the first point) */
+  addAreaPt: (p: { x: number; z: number }) => void
+  /** area mode: close + commit the polygon programmatically (Enter key) */
+  closeArea: () => void
+  /** area mode: remove the last vertex (Backspace) */
+  undoAreaPt: () => void
   setViewMode: (m: ViewMode) => void
   toggleFire: () => void
   toggleZones: () => void
@@ -230,6 +264,10 @@ export const usePlanner = create<PlannerState>()(
       measureMode: false,
       measureA: null,
       measureB: null,
+      measureTarget: 'distance',
+      areaPts: [],
+      areaClosed: false,
+      selectedUids: [],
 
       setRoom: (w, d) => {
         pushHistory(get(), 'room')
@@ -289,8 +327,107 @@ export const usePlanner = create<PlannerState>()(
         set((s) => ({
           items: s.items.filter((i) => i.uid !== uid),
           selectedUid: s.selectedUid === uid ? null : s.selectedUid,
+          selectedUids: s.selectedUids.filter((u) => u !== uid),
           ctxMenu: s.ctxMenu?.uid === uid ? null : s.ctxMenu,
         }))
+        syncDepth(set)
+      },
+
+      removeItems: (uids) => {
+        if (uids.length === 0) return
+        pushHistory(get(), 'remove')
+        const set2 = new Set(uids)
+        set((s) => ({
+          items: s.items.filter((i) => !set2.has(i.uid)),
+          selectedUid: set2.has(s.selectedUid) ? null : s.selectedUid,
+          selectedUids: s.selectedUids.filter((u) => !set2.has(u)),
+          ctxMenu: s.ctxMenu && set2.has(s.ctxMenu.uid) ? null : s.ctxMenu,
+        }))
+        syncDepth(set)
+      },
+
+      duplicateItems: (uids) => {
+        if (uids.length === 0) return
+        pushHistory(get(), 'duplicate')
+        set((s) => {
+          const wanted = new Set(uids)
+          const copies = s.items
+            .filter((i) => wanted.has(i.uid))
+            .map((it) => ({ ...it, uid: makeUid(), x: snap(it.x + 0.4), z: snap(it.z + 0.4) }))
+          if (copies.length === 0) return s
+          const newPrimary = copies[copies.length - 1].uid
+          return {
+            items: [...s.items, ...copies],
+            selectedUid: newPrimary,
+            selectedUids: copies.map((c) => c.uid),
+          }
+        })
+        syncDepth(set)
+      },
+
+      rotateItems: (uids) => {
+        if (uids.length === 0) return
+        pushHistory(get(), 'rotate')
+        const set2 = new Set(uids)
+        set((s) => {
+          const items = s.items.map((i) => {
+            if (!set2.has(i.uid)) return i
+            const rot = (i.rot + Math.PI / 2) % (Math.PI * 2)
+            const p = clampToRoom(i.x, i.z, i.id, rot, s.room)
+            return { ...i, rot, ...p }
+          })
+          return { items, templateId: 'custom' }
+        })
+        syncDepth(set)
+      },
+
+      nudgeItems: (uids, dx, dz) => {
+        if (uids.length === 0 || (dx === 0 && dz === 0)) return
+        pushHistory(get(), 'move')
+        const set2 = new Set(uids)
+        set((s) => {
+          const items = s.items.map((i) => {
+            if (!set2.has(i.uid)) return i
+            const p = clampToRoom(snap(i.x + dx), snap(i.z + dz), i.id, i.rot, s.room)
+            return { ...i, ...p }
+          })
+          return { items, templateId: 'custom' }
+        })
+        syncDepth(set)
+      },
+
+      dragItems: (starts, dx, dz) => {
+        if (starts.length === 0) return
+        pushHistory(get(), 'move')
+        const map = new Map(starts.map((st) => [st.uid, st]))
+        set((s) => {
+          const items = s.items.map((i) => {
+            const st = map.get(i.uid)
+            if (!st) return i
+            const p = clampToRoom(snap(st.x + dx), snap(st.z + dz), i.id, i.rot, s.room)
+            return { ...i, ...p }
+          })
+          return { items, templateId: 'custom' }
+        })
+        syncDepth(set)
+      },
+
+      alignItems: (uids, axis) => {
+        if (uids.length < 2) return
+        pushHistory(get(), 'align')
+        const set2 = new Set(uids)
+        set((s) => {
+          const sel = s.items.filter((i) => set2.has(i.uid))
+          const anchor = sel.find((i) => i.uid === s.selectedUid) ?? sel[0]
+          if (!anchor) return s
+          const target = anchor[axis]
+          const items = s.items.map((i) => {
+            if (!set2.has(i.uid)) return i
+            const p = clampToRoom(axis === 'x' ? target : i.x, axis === 'z' ? target : i.z, i.id, i.rot, s.room)
+            return { ...i, ...p }
+          })
+          return { items, templateId: 'custom' }
+        })
         syncDepth(set)
       },
 
@@ -325,17 +462,55 @@ export const usePlanner = create<PlannerState>()(
         syncDepth(set)
       },
 
-      select: (uid) => set({ selectedUid: uid, armedId: null, ctxMenu: null }),
+      select: (uid) =>
+        set({ selectedUid: uid, selectedUids: uid ? [uid] : [], armedId: null, ctxMenu: null }),
+
+      setPrimary: (uid) =>
+        set((s) => (s.selectedUids.includes(uid) ? { selectedUid: uid, ctxMenu: null } : s)),
+
+      toggleSelect: (uid) =>
+        set((s) => {
+          const has = s.selectedUids.includes(uid)
+          const next = has
+            ? s.selectedUids.filter((u) => u !== uid)
+            : [...s.selectedUids, uid]
+          return {
+            selectedUids: next,
+            selectedUid: next.length > 0 ? uid : null,
+            armedId: null,
+            ctxMenu: null,
+          }
+        }),
+
+      selectMany: (uids) =>
+        set({ selectedUid: uids[uids.length - 1] ?? null, selectedUids: uids, armedId: null, ctxMenu: null }),
+
+      selectAll: () =>
+        set((s) => ({
+          selectedUids: s.items.map((i) => i.uid),
+          selectedUid: s.items.length > 0 ? s.items[s.items.length - 1].uid : null,
+          armedId: null,
+          ctxMenu: null,
+        })),
+
       arm: (catalogId) =>
         set((s) => ({
           armedId: catalogId,
           selectedUid: catalogId ? null : s.selectedUid,
+          selectedUids: catalogId ? [] : s.selectedUids,
           ctxMenu: null,
           // placing furniture and measuring are mutually exclusive tools
           measureMode: catalogId ? false : s.measureMode,
         })),
 
-      openContextMenu: (uid, x, y) => set({ ctxMenu: { uid, x, y }, selectedUid: uid, armedId: null }),
+      openContextMenu: (uid, x, y) =>
+        set((s) => ({
+          ctxMenu: { uid, x, y },
+          // right-clicking a member of the current multi-selection keeps the group
+          selectedUid: s.selectedUids.includes(uid) ? s.selectedUid : uid,
+          selectedUids: s.selectedUids.includes(uid) ? s.selectedUids : [uid],
+          armedId: null,
+        })),
       closeContextMenu: () => set({ ctxMenu: null }),
 
       requestZoom: (kind) =>
@@ -351,7 +526,34 @@ export const usePlanner = create<PlannerState>()(
           ctxMenu: on ? null : s.ctxMenu,
         })),
 
-      stopMeasure: () => set({ measureMode: false, measureA: null, measureB: null }),
+      stopMeasure: () =>
+        set({ measureMode: false, measureA: null, measureB: null, areaPts: [], areaClosed: false }),
+
+      setMeasureTarget: (t) =>
+        set({ measureTarget: t, measureA: null, measureB: null, areaPts: [], areaClosed: false }),
+
+      addAreaPt: (p) =>
+        set((s) => {
+          if (!s.measureMode || s.measureTarget !== 'area') return s
+          const pt = { x: snap(p.x), z: snap(p.z) }
+          // a closed polygon restarts on the next click
+          if (s.areaClosed) return { areaPts: [pt], areaClosed: false }
+          // clicking on/near the first vertex closes the polygon (needs 3+ points)
+          if (s.areaPts.length >= 3) {
+            const f = s.areaPts[0]
+            if (Math.hypot(f.x - pt.x, f.z - pt.z) < 0.25) return { areaClosed: true }
+          }
+          return { areaPts: [...s.areaPts, pt] }
+        }),
+
+      closeArea: () =>
+        set((s) => (s.measureMode && s.measureTarget === 'area' && s.areaPts.length >= 3 ? { areaClosed: true } : s)),
+
+      undoAreaPt: () =>
+        set((s) => {
+          if (s.areaClosed) return { areaClosed: false }
+          return { areaPts: s.areaPts.slice(0, -1) }
+        }),
 
       setMeasurePoint: (p) =>
         set((s) => {
@@ -477,6 +679,7 @@ export const usePlanner = create<PlannerState>()(
             projectName: t.projectName,
             templateId: id,
             selectedUid: null,
+            selectedUids: [],
             armedId: null,
             ctxMenu: null,
           }
@@ -486,7 +689,7 @@ export const usePlanner = create<PlannerState>()(
 
       clearAll: () => {
         pushHistory(get(), 'clear')
-        set({ items: [], selectedUid: null, armedId: null, ctxMenu: null, templateId: 'custom' })
+        set({ items: [], selectedUid: null, selectedUids: [], armedId: null, ctxMenu: null, templateId: 'custom' })
         syncDepth(set)
       },
 
@@ -500,6 +703,7 @@ export const usePlanner = create<PlannerState>()(
           projectName: snap.projectName,
           templateId: snap.templateId,
           selectedUid: null,
+          selectedUids: [],
           armedId: null,
           ctxMenu: null,
         }))
@@ -521,6 +725,7 @@ export const usePlanner = create<PlannerState>()(
           projectName: prev.projectName,
           templateId: prev.templateId,
           selectedUid: null,
+          selectedUids: [],
           armedId: null,
           ctxMenu: null,
         }))
@@ -540,6 +745,7 @@ export const usePlanner = create<PlannerState>()(
           projectName: next.projectName,
           templateId: next.templateId,
           selectedUid: null,
+          selectedUids: [],
           armedId: null,
           ctxMenu: null,
         }))

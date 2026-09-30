@@ -1,0 +1,732 @@
+     1→'use client'
+     2→
+     3→import * as THREE from 'three'
+     4→import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+     5→import { Canvas, useFrame, type ThreeEvent } from '@react-three/fiber'
+     6→import { Grid, Html, Line, OrbitControls } from '@react-three/drei'
+     7→import { useTheme } from 'next-themes'
+     8→import { damp, damp3 } from 'maath/easing'
+     9→import { usePlanner, clampToRoom } from '@/lib/planner/store'
+    10→import { getItem, halfExtents } from '@/lib/planner/catalog'
+    11→import { egressRoutes } from '@/lib/planner/egress'
+    12→import { ZONE_META, drawableZones } from '@/lib/planner/zones'
+    13→import { ItemModel } from './furniture'
+    14→
+    15→const WALL_H = 2.5
+    16→const WALL_T = 0.12
+    17→
+    18→/* Day + night scene palettes — the 3D viewport re-lights when the theme flips */
+    19→const DAY = {
+    20→  bg: '#EDE7D9',
+    21→  fog: '#EDE7D9',
+    22→  floor: '#F5F0E4',
+    23→  apron: '#E9E1CF',
+    24→  wall: '#EFE8D8',
+    25→  wallCap: '#3A372F',
+    26→  gridCell: '#DCD2BA',
+    27→  gridSection: '#C6B995',
+    28→  windowGlass: '#D8E0D6',
+    29→  windowFrame: '#A78861',
+    30→  threshold: '#C9BC9C',
+    31→  hemiSky: '#FFFFFF',
+    32→  hemiGround: '#CBC2AC',
+    33→  ambient: 0.55,
+    34→  hemi: 0.55,
+    35→  sun: 1.25,
+    36→}
+    37→
+    38→const NIGHT = {
+    39→  bg: '#191510',
+    40→  fog: '#191510',
+    41→  floor: '#2A251D',
+    42→  apron: '#201C15',
+    43→  wall: '#332D24',
+    44→  wallCap: '#514939',
+    45→  gridCell: '#3D362B',
+    46→  gridSection: '#514839',
+    47→  windowGlass: '#8FA08F',
+    48→  windowFrame: '#8A724E',
+    49→  threshold: '#57503F',
+    50→  hemiSky: '#6B6355',
+    51→  hemiGround: '#16120C',
+    52→  ambient: 0.34,
+    53→  hemi: 0.42,
+    54→  sun: 0.85,
+    55→}
+    56→
+    57→function floorPoint(e: ThreeEvent<PointerEvent | MouseEvent>): { x: number; z: number } {
+    58→  const t = -e.ray.origin.y / e.ray.direction.y
+    59→  return {
+    60→    x: e.ray.origin.x + e.ray.direction.x * t,
+    61→    z: e.ray.origin.z + e.ray.direction.z * t,
+    62→  }
+    63→}
+    64→
+    65→// ─── Floor measure tool ───────────────────────────────────────────────────
+    66→
+    67→/** meters → feet/inches string, e.g. 2.4 m → 7′10″ */
+    68→function feetInches(m: number): string {
+    69→  const totalIn = m * 39.3701
+    70→  const ft = Math.floor(totalIn / 12)
+    71→  let inch = Math.round(totalIn - ft * 12)
+    72→  let ftOut = ft
+    73→  if (inch === 12) {
+    74→    ftOut += 1
+    75→    inch = 0
+    76→  }
+    77→  return `${ftOut}′${inch}″`
+    78→}
+    79→
+    80→const MEASURE_INK = '#2E2B26'
+    81→
+    82→function MeasureMarker({ x, z, color }: { x: number; z: number; color: string }) {
+    83→  return (
+    84→    <group position={[x, 0.022, z]}>
+    85→      <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={3}>
+    86→        <ringGeometry args={[0.09, 0.14, 28]} />
+    87→        <meshBasicMaterial color={color} depthWrite={false} transparent opacity={0.95} />
+    88→      </mesh>
+    89→      <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={3}>
+    90→        <circleGeometry args={[0.045, 20]} />
+    91→        <meshBasicMaterial color={color} depthWrite={false} />
+    92→      </mesh>
+    93→    </group>
+    94→  )
+    95→}
+    96→
+    97→/**
+    98→ * The tape-measure overlay: two sampled points, a straight run between them
+    99→ * and a floating distance label. While only A is set, the line follows the
+   100→ * cursor as a dashed preview.
+   101→ */
+   102→function MeasureGizmo({
+   103→  a, b, hover,
+   104→}: {
+   105→  a: { x: number; z: number }
+   106→  b: { x: number; z: number } | null
+   107→  hover: { x: number; z: number } | null
+   108→}) {
+   109→  const target = b ?? (hover && (Math.abs(hover.x - a.x) > 0.01 || Math.abs(hover.z - a.z) > 0.01) ? hover : null)
+   110→  const dist = target ? Math.hypot(target.x - a.x, target.z - a.z) : 0
+   111→  const mid = target ? { x: (a.x + target.x) / 2, z: (a.z + target.z) / 2 } : null
+   112→  const confirmed = b !== null
+   113→
+   114→  return (
+   115→    <group renderOrder={3}>
+   116→      {target && (
+   117→        <Line
+   118→          points={[
+   119→            [a.x, 0.025, a.z],
+   120→            [target.x, 0.025, target.z],
+   121→          ]}
+   122→          color={MEASURE_INK}
+   123→          lineWidth={2}
+   124→          dashed={!confirmed}
+   125→          dashSize={0.14}
+   126→          gapSize={0.1}
+   127→          transparent
+   128→          opacity={confirmed ? 0.95 : 0.65}
+   129→          renderOrder={3}
+   130→        />
+   131→      )}
+   132→      <MeasureMarker x={a.x} z={a.z} color={MEASURE_INK} />
+   133→      {b && <MeasureMarker x={b.x} z={b.z} color="#16A34A" />}
+   134→      {mid && (
+   135→        <Html position={[mid.x, 0.05, mid.z]} center style={{ pointerEvents: 'none' }} zIndexRange={[30, 0]}>
+   136→          <div
+   137→            className="flex items-center gap-1.5 whitespace-nowrap rounded-full bg-charcoal/92 px-2.5 py-1 shadow-md ring-1 ring-white/20"
+   138→            data-testid="measure-label"
+   139→          >
+   140→            <span
+   141→              className="h-1.5 w-1.5 rounded-full"
+   142→              style={{ backgroundColor: confirmed ? '#4ADE80' : '#D6D3D1' }}
+   143→              aria-hidden
+   144→            />
+   145→            <span className="font-display text-[11.5px] font-bold tabular-nums leading-none text-warmwhite">
+   146→              {dist.toFixed(2)} m
+   147→            </span>
+   148→            <span className="text-[9.5px] font-medium tabular-nums leading-none text-stone-300">
+   149→              {feetInches(dist)}
+   150→            </span>
+   151→          </div>
+   152→        </Html>
+   153→      )}
+   154→    </group>
+   155→  )
+   156→}
+   157→
+   158→function ZoneWashes({ zones, dark }: { zones: ReturnType<typeof drawableZones>; dark: boolean }) {
+   159→  return (
+   160→    <group>
+   161→      {zones.map(({ zone: zn, x1, z1, x2, z2 }) => (
+   162→        <mesh
+   163→          key={zn.id}
+   164→          position={[(x1 + x2) / 2, 0.0035, (z1 + z2) / 2]}
+   165→          rotation={[-Math.PI / 2, 0, 0]}
+   166→          renderOrder={1}
+   167→        >
+   168→          <planeGeometry args={[x2 - x1, z2 - z1]} />
+   169→          <meshBasicMaterial
+   170→            color={ZONE_META[zn.kind].color}
+   171→            transparent
+   172→            opacity={dark ? 0.17 : 0.13}
+   173→            depthWrite={false}
+   174→          />
+   175→        </mesh>
+   176→      ))}
+   177→    </group>
+   178→  )
+   179→}
+   180→
+   181→// ─── Camera rig: smooth swing between plan and 3D + zoom requests ─────────
+   182→
+   183→function CameraRig({
+   184→  roomW, roomD, viewMode, controlsRef, animatingRef,
+   185→}: {
+   186→  roomW: number
+   187→  roomD: number
+   188→  viewMode: 'plan' | '3d'
+   189→  controlsRef: React.MutableRefObject<any>
+   190→  animatingRef: React.MutableRefObject<boolean>
+   191→}) {
+   192→  const zoomReq = usePlanner((s) => s.zoomReq)
+   193→  const lastReq = useRef(0)
+   194→  /** active dolly animation: camera position we are easing toward, or null */
+   195→  const dollyTarget = useRef<THREE.Vector3 | null>(null)
+   196→
+   197→  const target = useMemo(() => {
+   198→    return viewMode === 'plan'
+   199→      ? { pos: new THREE.Vector3(0.02, Math.max(roomW, roomD) * 1.3 + 3, 0.02), look: new THREE.Vector3(0, 0, 0) }
+   200→      : { pos: new THREE.Vector3(roomW * 0.52, Math.max(6, Math.max(roomW, roomD) * 0.52), roomD * 0.82), look: new THREE.Vector3(0, 0.4, 0) }
+   201→  }, [viewMode, roomW, roomD])
+   202→
+   203→  useEffect(() => {
+   204→    animatingRef.current = true
+   205→  }, [target, animatingRef])
+   206→
+   207→  // react to zoom requests coming from the HUD buttons / keyboard
+   208→  useEffect(() => {
+   209→    if (zoomReq.n === lastReq.current) return
+   210→    lastReq.current = zoomReq.n
+   211→    const c = controlsRef.current
+   212→    if (!c) return
+   213→    if (zoomReq.kind === 'fit') {
+   214→      // re-frame the room: replay the swing to the current view's home position
+   215→      animatingRef.current = true
+   216→      return
+   217→    }
+   218→    const cam = c.object as THREE.Camera
+   219→    const dir = cam.position.clone().sub(c.target)
+   220→    const len = dir.length()
+   221→    const next = THREE.MathUtils.clamp(
+   222→      zoomReq.kind === 'in' ? len * 0.72 : len * 1.42,
+   223→      c.minDistance ?? 3.5,
+   224→      c.maxDistance ?? 48,
+   225→    )
+   226→    if (Math.abs(next - len) < 0.05) return
+   227→    dollyTarget.current = c.target.clone().add(dir.setLength(next))
+   228→  }, [zoomReq, controlsRef])
+   229→
+   230→  useFrame((state, dt) => {
+   231→    const c = controlsRef.current
+   232→    if (!c) return
+   233→
+   234→    // eased zoom-in/out along the view vector
+   235→    if (dollyTarget.current) {
+   236→      damp3(state.camera.position, dollyTarget.current, 0.16, dt)
+   237→      if (state.camera.position.distanceTo(dollyTarget.current) < 0.04) {
+   238→        state.camera.position.copy(dollyTarget.current)
+   239→        dollyTarget.current = null
+   240→      }
+   241→      return
+   242→    }
+   243→
+   244→    if (animatingRef.current) {
+   245→      c.enabled = false
+   246→      // top-down needs a stable roll: screen-up = north (-z); 3D restores standard up
+   247→      if (viewMode === 'plan') state.camera.up.set(0, 0, -1)
+   248→      else state.camera.up.set(0, 1, 0)
+   249→      damp3(state.camera.position, target.pos, 0.42, dt)
+   250→      damp3(c.target, target.look, 0.42, dt)
+   251→      state.camera.lookAt(target.look)
+   252→      if (state.camera.position.distanceTo(target.pos) < 0.06) {
+   253→        animatingRef.current = false
+   254→        c.enabled = true
+   255→      }
+   256→    }
+   257→  })
+   258→  return null
+   259→}
+   260→
+   261→// ─── Room shell: floor, grid, walls, windows, exits ────────────────────────
+   262→
+   263→type Palette = typeof DAY
+   264→
+   265→function WallSegment({ x, z, len, alongX, pal }: { x: number; z: number; len: number; alongX: boolean; pal: Palette }) {
+   266→  if (len <= 0.05) return null
+   267→  return (
+   268→    <group position={[x, 0, z]}>
+   269→      <mesh position={[0, WALL_H / 2, 0]} castShadow receiveShadow>
+   270→        <boxGeometry args={alongX ? [len, WALL_H, WALL_T] : [WALL_T, WALL_H, len]} />
+   271→        <meshStandardMaterial color={pal.wall} roughness={0.92} />
+   272→      </mesh>
+   273→      <mesh position={[0, WALL_H + 0.03, 0]}>
+   274→        <boxGeometry args={alongX ? [len, 0.06, WALL_T + 0.04] : [WALL_T + 0.04, 0.06, len]} />
+   275→        <meshStandardMaterial color={pal.wallCap} roughness={0.8} />
+   276→      </mesh>
+   277→    </group>
+   278→  )
+   279→}
+   280→
+   281→function Room({ w, d, showFire, pal }: { w: number; d: number; showFire: boolean; pal: Palette }) {
+   282→  const segs = useMemo(() => {
+   283→    const S = [
+   284→      { x: (-w / 2 + -0.7) / 2, z: d / 2 + WALL_T / 2, len: -0.7 - -w / 2, alongX: true },
+   285→      { x: (0.7 + w / 2) / 2, z: d / 2 + WALL_T / 2, len: w / 2 - 0.7, alongX: true },
+   286→    ]
+   287→    const rearX = w / 4
+   288→    const N = [
+   289→      { x: (-w / 2 + (rearX - 0.475)) / 2, z: -d / 2 - WALL_T / 2, len: rearX - 0.475 - -w / 2, alongX: true },
+   290→      { x: (rearX + 0.475 + w / 2) / 2, z: -d / 2 - WALL_T / 2, len: w / 2 - (rearX + 0.475), alongX: true },
+   291→    ]
+   292→    const W = [{ x: -w / 2 - WALL_T / 2, z: 0, len: d + WALL_T * 2, alongX: false }]
+   293→    const E = [{ x: w / 2 + WALL_T / 2, z: 0, len: d + WALL_T * 2, alongX: false }]
+   294→    return [...S, ...N, ...W, ...E]
+   295→  }, [w, d])
+   296→
+   297→  const doorH = 1.4
+   298→  const rearW = 0.95
+   299→
+   300→  return (
+   301→    <group>
+   302→      {/* floor slab */}
+   303→      <mesh position={[0, -0.04, 0]} receiveShadow>
+   304→        <boxGeometry args={[w, 0.08, d]} />
+   305→        <meshStandardMaterial color={pal.floor} roughness={0.95} />
+   306→      </mesh>
+   307→      {/* blueprint grid */}
+   308→      <Grid
+   309→        position={[0, 0.006, 0]}
+   310→        cellSize={0.5}
+   311→        cellThickness={0.5}
+   312→        cellColor={pal.gridCell}
+   313→        sectionSize={2}
+   314→        sectionThickness={0.9}
+   315→        sectionColor={pal.gridSection}
+   316→        fadeDistance={58}
+   317→        fadeStrength={1.1}
+   318→        infiniteGrid
+   319→      />
+   320→      {segs.map((s, i) => (
+   321→        <WallSegment key={i} {...s} pal={pal} />
+   322→      ))}
+   323→      {/* interior windows on west wall */}
+   324→      {[-d / 4, d / 4].map((z) => (
+   325→        <group key={z} position={[-w / 2 + 0.04, 0, z]}>
+   326→          <mesh position={[0, 1.45, 0]}>
+   327→            <boxGeometry args={[0.03, 1.3, Math.min(1.6, d / 3)]} />
+   328→            <meshStandardMaterial color={pal.windowGlass} transparent opacity={0.4} roughness={0.15} metalness={0.1} />
+   329→          </mesh>
+   330→          <mesh position={[0, 1.45, 0]}>
+   331→            <boxGeometry args={[0.05, 1.38, 0.06]} />
+   332→            <meshStandardMaterial color={pal.windowFrame} roughness={0.8} />
+   333→          </mesh>
+   334→          <mesh position={[0, 0.78, 0]}>
+   335→            <boxGeometry args={[0.07, 0.08, Math.min(1.66, d / 3 + 0.06)]} />
+   336→            <meshStandardMaterial color={pal.windowFrame} roughness={0.8} />
+   337→          </mesh>
+   338→        </group>
+   339→      ))}
+   340→      {/* entrance threshold + rear exit threshold */}
+   341→      <mesh position={[0, 0.005, d / 2 - 0.02]} rotation={[-Math.PI / 2, 0, 0]}>
+   342→        <planeGeometry args={[doorH, 0.16]} />
+   343→        <meshStandardMaterial color={pal.threshold} roughness={1} />
+   344→      </mesh>
+   345→      <mesh position={[w / 4, 0.005, -d / 2 + 0.02]} rotation={[-Math.PI / 2, 0, 0]}>
+   346→        <planeGeometry args={[rearW, 0.16]} />
+   347→        <meshStandardMaterial color={pal.threshold} roughness={1} />
+   348→      </mesh>
+   349→      {showFire && <Exits w={w} d={d} />}
+   350→    </group>
+   351→  )
+   352→}
+   353→
+   354→function Exits({ w, d }: { w: number; d: number }) {
+   355→  const green = '#16A34A'
+   356→  const frame = (x: number, z: number, alongX: boolean, width: number) => (
+   357→    <group position={[x, 0, z]}>
+   358→      {/* jambs */}
+   359→      <mesh position={alongX ? [-width / 2 - 0.05, 1.1, 0] : [0, 1.1, -width / 2 - 0.05]} castShadow>
+   360→        <boxGeometry args={alongX ? [0.1, 2.2, WALL_T + 0.05] : [WALL_T + 0.05, 2.2, 0.1]} />
+   361→        <meshStandardMaterial color="#2F7A4F" emissive={green} emissiveIntensity={0.08} roughness={0.6} />
+   362→      </mesh>
+   363→      <mesh position={alongX ? [width / 2 + 0.05, 1.1, 0] : [0, 1.1, width / 2 + 0.05]} castShadow>
+   364→        <boxGeometry args={alongX ? [0.1, 2.2, WALL_T + 0.05] : [WALL_T + 0.05, 2.2, 0.1]} />
+   365→        <meshStandardMaterial color="#2F7A4F" emissive={green} emissiveIntensity={0.08} roughness={0.6} />
+   366→      </mesh>
+   367→      {/* header */}
+   368→      <mesh position={[0, 2.24, 0]}>
+   369→        <boxGeometry args={alongX ? [width + 0.2, 0.12, WALL_T + 0.05] : [WALL_T + 0.05, 0.12, width + 0.2]} />
+   370→        <meshStandardMaterial color="#2F7A4F" emissive={green} emissiveIntensity={0.08} roughness={0.6} />
+   371→      </mesh>
+   372→      {/* sign */}
+   373→      <mesh position={alongX ? [0, 2.3, z > 0 ? -0.35 : 0.35] : [x > 0 ? -0.35 : 0.35, 2.3, 0]}>
+   374→        <boxGeometry args={[0.44, 0.2, 0.05]} />
+   375→        <meshStandardMaterial color={green} emissive={green} emissiveIntensity={0.85} roughness={0.4} />
+   376→      </mesh>
+   377→    </group>
+   378→  )
+   379→  return (
+   380→    <group>
+   381→      {frame(0, d / 2 + WALL_T / 2, true, 1.4)}
+   382→      {frame(w / 4, -d / 2 - WALL_T / 2, true, 0.95)}
+   383→    </group>
+   384→  )
+   385→}
+   386→
+   387→// ─── Animated egress chevrons ──────────────────────────────────────────────
+   388→
+   389→function Chevron() {
+   390→  return (
+   391→    <mesh rotation={[Math.PI / 2, 0, 0]}>
+   392→      <coneGeometry args={[0.11, 0.34, 4]} />
+   393→      <meshBasicMaterial color="#16A34A" transparent opacity={0.95} />
+   394→    </mesh>
+   395→  )
+   396→}
+   397→
+   398→function EgressPaths({ w, d }: { w: number; d: number }) {
+   399→  const { curves, counts, total } = useMemo(() => {
+   400→    const v = (x: number, z: number) => new THREE.Vector3(x, 0.035, z)
+   401→    const mk = (pts: THREE.Vector3[]) => new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4)
+   402→    const cs = egressRoutes({ w, d }).map((r) => mk(r.map((p) => v(p.x, p.z))))
+   403→    const countsArr = cs.map((c) => Math.max(7, Math.floor(c.getLength() / 0.62)))
+   404→    return { curves: cs, counts: countsArr, total: countsArr.reduce((a, b) => a + b, 0) }
+   405→  }, [w, d])
+   406→
+   407→  const groupRef = useRef<THREE.Group>(null)
+   408→
+   409→  useFrame(({ clock }) => {
+   410→    const t0 = clock.elapsedTime * 0.16
+   411→    let idx = 0
+   412→    for (let ci = 0; ci < curves.length; ci++) {
+   413→      const c = curves[ci]
+   414→      const n = counts[ci]
+   415→      for (let i = 0; i < n; i++, idx++) {
+   416→        const obj = groupRef.current?.children[idx]
+   417→        if (!obj) continue
+   418→        const t = (t0 + i / n) % 1
+   419→        const p = c.getPointAt(t)
+   420→        const tan = c.getTangentAt(t)
+   421→        obj.position.set(p.x, 0.035, p.z)
+   422→        obj.lookAt(p.x + tan.x, 0.035, p.z + tan.z)
+   423→        const s = 0.55 + 0.55 * Math.sin(t * Math.PI)
+   424→        obj.scale.setScalar(s)
+   425→      }
+   426→    }
+   427→  })
+   428→
+   429→  return (
+   430→    <group ref={groupRef}>
+   431→      {Array.from({ length: total }, (_, i) => (
+   432→        <Chevron key={i} />
+   433→      ))}
+   434→    </group>
+   435→  )
+   436→}
+   437→
+   438→// ─── Placed items with drag support ────────────────────────────────────────
+   439→
+   440→function PlacedItemView({
+   441→  uid, id, x, z, rot, brand, selected, dragging, interactive,
+   442→  onPointerDown, onOpenContext,
+   443→}: {
+   444→  uid: string
+   445→  id: string
+   446→  x: number
+   447→  z: number
+   448→  rot: number
+   449→  brand: string
+   450→  selected: boolean
+   451→  dragging: boolean
+   452→  /** false while the measure tool is armed — no grab cursor / selection styling */
+   453→  interactive: boolean
+   454→  onPointerDown: (e: ThreeEvent<PointerEvent>, uid: string) => void
+   455→  onOpenContext: (e: ThreeEvent<MouseEvent>, uid: string) => void
+   456→}) {
+   457→  const groupRef = useRef<THREE.Group>(null)
+   458→  const ringRef = useRef<THREE.Mesh>(null)
+   459→  useFrame((_, dt) => {
+   460→    if (groupRef.current) damp(groupRef.current.rotation, 'y', rot, 0.16, dt)
+   461→    // selected ring gently breathes so the selection feels alive
+   462→    if (ringRef.current && selected) {
+   463→      const s = 1 + Math.sin(performance.now() * 0.004) * 0.025
+   464→      ringRef.current.scale.setScalar(s)
+   465→    }
+   466→  })
+   467→  const cat = getItem(id)
+   468→  const { hx, hz } = halfExtents(id, rot)
+   469→  const ringR = Math.max(hx, hz) + 0.14
+   470→
+   471→  return (
+   472→    <>
+   473→      {selected && (
+   474→        <mesh ref={ringRef} rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.014, z]}>
+   475→          <ringGeometry args={[ringR, ringR + 0.06, 44]} />
+   476→          <meshBasicMaterial color={brand} transparent opacity={0.85} />
+   477→        </mesh>
+   478→      )}
+   479→      {(dragging || selected) && cat && (
+   480→        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.012, z]}>
+   481→          <planeGeometry args={[hx * 2, hz * 2]} />
+   482→          <meshBasicMaterial color={brand} transparent opacity={dragging ? 0.22 : 0.1} depthWrite={false} />
+   483→        </mesh>
+   484→      )}
+   485→      <group
+   486→        ref={groupRef}
+   487→        position={[x, 0, z]}
+   488→        onPointerDown={(e) => onPointerDown(e, uid)}
+   489→        onContextMenu={(e) => onOpenContext(e, uid)}
+   490→        onPointerOver={() => {
+   491→          if (interactive) document.body.style.cursor = 'grab'
+   492→        }}
+   493→        onPointerOut={() => {
+   494→          document.body.style.cursor = ''
+   495→        }}
+   496→      >
+   497→        <ItemModel id={id} brand={brand} />
+   498→      </group>
+   499→    </>
+   500→  )
+   501→}
+   502→
+   503→// ─── Ghost preview ─────────────────────────────────────────────────────────
+   504→
+   505→function Ghost({ id, x, z, brand }: { id: string; x: number; z: number; brand: string }) {
+   506→  const cat = getItem(id)
+   507→  if (!cat) return null
+   508→  return (
+   509→    <group position={[x, 0, z]}>
+   510→      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.013, 0]}>
+   511→        <planeGeometry args={[cat.w, cat.d]} />
+   512→        <meshBasicMaterial color={brand} transparent opacity={0.35} depthWrite={false} />
+   513→      </mesh>
+   514→      <ItemModel id={id} brand={brand} />
+   515→    </group>
+   516→  )
+   517→}
+   518→
+   519→// ─── Scene root ────────────────────────────────────────────────────────────
+   520→
+   521→export default function Scene() {
+   522→  const room = usePlanner((s) => s.room)
+   523→  const items = usePlanner((s) => s.items)
+   524→  const brand = usePlanner((s) => s.brandColor)
+   525→  const viewMode = usePlanner((s) => s.viewMode)
+   526→  const showFire = usePlanner((s) => s.showFire)
+   527→  const zones = usePlanner((s) => s.zones)
+   528→  const showZones = usePlanner((s) => s.showZones)
+   529→  const armedId = usePlanner((s) => s.armedId)
+   530→  const selectedUid = usePlanner((s) => s.selectedUid)
+   531→  const addItem = usePlanner((s) => s.addItem)
+   532→  const moveItem = usePlanner((s) => s.moveItem)
+   533→  const select = usePlanner((s) => s.select)
+   534→  const arm = usePlanner((s) => s.arm)
+   535→  const openContextMenu = usePlanner((s) => s.openContextMenu)
+   536→  const measureMode = usePlanner((s) => s.measureMode)
+   537→  const measureA = usePlanner((s) => s.measureA)
+   538→  const measureB = usePlanner((s) => s.measureB)
+   539→  const setMeasurePoint = usePlanner((s) => s.setMeasurePoint)
+   540→  const { resolvedTheme } = useTheme()
+   541→  const dark = resolvedTheme === 'dark'
+   542→  const pal = dark ? NIGHT : DAY
+   543→
+   544→  const controlsRef = useRef<any>(null)
+   545→  const animatingRef = useRef(true)
+   546→  const dragUid = useRef<string | null>(null)
+   547→  const downScreen = useRef<{ x: number; y: number } | null>(null)
+   548→  /** where the right-button went down, so a right-drag pan doesn't open the menu */
+   549→  const rightDown = useRef<{ x: number; y: number } | null>(null)
+   550→  const [ghost, setGhost] = useState<{ x: number; z: number } | null>(null)
+   551→  const [draggingUid, setDraggingUid] = useState<string | null>(null)
+   552→  /** live cursor point while the measure tool is armed (preview line) */
+   553→  const [measureHover, setMeasureHover] = useState<{ x: number; z: number } | null>(null)
+   554→
+   555→  useEffect(() => {
+   556→    const up = () => {
+   557→      dragUid.current = null
+   558→      setDraggingUid(null)
+   559→      downScreen.current = null
+   560→      if (controlsRef.current) controlsRef.current.enabled = true
+   561→    }
+   562→    window.addEventListener('pointerup', up)
+   563→    return () => window.removeEventListener('pointerup', up)
+   564→  }, [])
+   565→
+   566→  const onGroundDown = (e: ThreeEvent<PointerEvent>) => {
+   567→    if (e.nativeEvent.button === 2) {
+   568→      rightDown.current = { x: e.nativeEvent.clientX, y: e.nativeEvent.clientY }
+   569→      return
+   570→    }
+   571→    downScreen.current = { x: e.nativeEvent.clientX, y: e.nativeEvent.clientY }
+   572→  }
+   573→
+   574→  const onGroundMove = (e: ThreeEvent<PointerEvent>) => {
+   575→    const pt = floorPoint(e)
+   576→    if (dragUid.current) {
+   577→      moveItem(dragUid.current, pt.x, pt.z)
+   578→      return
+   579→    }
+   580→    if (measureMode) {
+   581→      // only re-render when the cursor moved meaningfully (2 cm)
+   582→      setMeasureHover((prev) =>
+   583→        !prev || Math.abs(prev.x - pt.x) > 0.02 || Math.abs(prev.z - pt.z) > 0.02 ? { x: pt.x, z: pt.z } : prev,
+   584→      )
+   585→      return
+   586→    }
+   587→    if (armedId) {
+   588→      const p = clampToRoom(pt.x, pt.z, armedId, 0, room)
+   589→      setGhost(p)
+   590→    }
+   591→  }
+   592→
+   593→  const onGroundUp = (e: ThreeEvent<PointerEvent>) => {
+   594→    const ds = downScreen.current
+   595→    downScreen.current = null
+   596→    if (dragUid.current) {
+   597→      dragUid.current = null
+   598→      setDraggingUid(null)
+   599→      if (controlsRef.current) controlsRef.current.enabled = true
+   600→      return
+   601→    }
+   602→    if (!ds) return
+   603→    const moved = Math.hypot(e.nativeEvent.clientX - ds.x, e.nativeEvent.clientY - ds.y)
+   604→    if (moved > 7) return
+   605→    if (measureMode) {
+   606→      const pt = floorPoint(e)
+   607→      setMeasurePoint(pt)
+   608→      setMeasureHover({ x: pt.x, z: pt.z })
+   609→      return
+   610→    }
+   611→    if (armedId) {
+   612→      const pt = floorPoint(e)
+   613→      addItem(armedId, pt.x, pt.z)
+   614→      arm(null)
+   615→      setGhost(null)
+   616→    } else {
+   617→      select(null)
+   618→    }
+   619→  }
+   620→
+   621→  const onItemDown = (e: ThreeEvent<PointerEvent>, uid: string) => {
+   622→    if (measureMode) return // measure clicks pass through pieces to the floor
+   623→    if (armedId) return // let placement pass through
+   624→    if (e.nativeEvent.button !== 0) return // right/middle click → context menu, not drag
+   625→    e.stopPropagation()
+   626→    select(uid)
+   627→    dragUid.current = uid
+   628→    setDraggingUid(uid)
+   629→    downScreen.current = null
+   630→    if (controlsRef.current) controlsRef.current.enabled = false
+   631→  }
+   632→
+   633→  const onItemContext = (e: ThreeEvent<MouseEvent>, uid: string) => {
+   634→    if (measureMode) return // no context menu while measuring
+   635→    e.stopPropagation()
+   636→    e.nativeEvent.preventDefault()
+   637→    // ignore if this was the end of a right-drag pan
+   638→    const rd = rightDown.current
+   639→    rightDown.current = null
+   640→    if (rd && Math.hypot(e.nativeEvent.clientX - rd.x, e.nativeEvent.clientY - rd.y) > 6) return
+   641→    openContextMenu(uid, e.nativeEvent.clientX, e.nativeEvent.clientY)
+   642→  }
+   643→
+   644→  return (
+   645→    <Canvas
+   646→      shadows
+   647→      dpr={[1, 2]}
+   648→      camera={{ position: [11, 8.5, 11], fov: 40, near: 0.1, far: 150 }}
+   649→      gl={{ antialias: true }}
+   650→      className={`!absolute inset-0${measureMode ? ' cursor-crosshair' : ''}`}
+   651→    >
+   652→      <color attach="background" args={[pal.bg]} />
+   653→      <fog attach="fog" args={[pal.fog, 34, 85]} />
+   654→
+   655→      <ambientLight intensity={pal.ambient} />
+   656→      <hemisphereLight args={[pal.hemiSky, pal.hemiGround, pal.hemi]} />
+   657→      <directionalLight
+   658→        position={[9, 13, 7]}
+   659→        intensity={pal.sun}
+   660→        castShadow
+   661→        shadow-mapSize={[2048, 2048]}
+   662→        shadow-camera-left={-14}
+   663→        shadow-camera-right={14}
+   664→        shadow-camera-top={14}
+   665→        shadow-camera-bottom={-14}
+   666→        shadow-camera-near={1}
+   667→        shadow-camera-far={45}
+   668→        shadow-bias={-0.0004}
+   669→      />
+   670→
+   671→      <Suspense fallback={null}>
+   672→        <Room w={room.w} d={room.d} showFire={showFire} pal={pal} />
+   673→        {showZones && <ZoneWashes zones={drawableZones(zones, room)} dark={dark} />}
+   674→        {showFire && <EgressPaths w={room.w} d={room.d} />}
+   675→
+   676→        {/* interaction ground */}
+   677→        <mesh
+   678→          position={[0, -0.09, 0]}
+   679→          rotation={[-Math.PI / 2, 0, 0]}
+   680→          receiveShadow
+   681→          onPointerDown={onGroundDown}
+   682→          onPointerMove={onGroundMove}
+   683→          onPointerUp={onGroundUp}
+   684→        >
+   685→          <planeGeometry args={[90, 90]} />
+   686→          <meshStandardMaterial color={pal.apron} roughness={1} />
+   687→        </mesh>
+   688→
+   689→        {items.map((it) => (
+   690→          <PlacedItemView
+   691→            key={it.uid}
+   692→            {...it}
+   693→            brand={brand}
+   694→            selected={selectedUid === it.uid && !measureMode}
+   695→            dragging={draggingUid === it.uid}
+   696→            interactive={!measureMode}
+   697→            onPointerDown={onItemDown}
+   698→            onOpenContext={onItemContext}
+   699→          />
+   700→        ))}
+   701→
+   702→        {armedId && ghost && <Ghost id={armedId} x={ghost.x} z={ghost.z} brand={brand} />}
+   703→
+   704→        {measureMode && measureA && (
+   705→          <MeasureGizmo a={measureA} b={measureB} hover={measureHover} />
+   706→        )}
+   707→      </Suspense>
+   708→
+   709→      <CameraRig
+   710→        roomW={room.w}
+   711→        roomD={room.d}
+   712→        viewMode={viewMode}
+   713→        controlsRef={controlsRef}
+   714→        animatingRef={animatingRef}
+   715→      />
+   716→      <OrbitControls
+   717→        ref={controlsRef}
+   718→        makeDefault
+   719→        enableDamping
+   720→        dampingFactor={0.09}
+   721→        minDistance={3.5}
+   722→        maxDistance={48}
+   723→        maxPolarAngle={Math.PI / 2 - 0.05}
+   724→        enableRotate={viewMode === '3d'}
+   725→        onStart={() => {
+   726→          animatingRef.current = false
+   727→        }}
+   728→      />
+   729→    </Canvas>
+   730→  )
+   731→}
+   732→

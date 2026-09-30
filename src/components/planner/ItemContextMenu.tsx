@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
-import { Copy, DollarSign, RotateCw, Trash2 } from 'lucide-react'
+import { BoxSelect, Copy, DollarSign, RotateCw, Trash2 } from 'lucide-react'
 import { usePlanner } from '@/lib/planner/store'
 import { getItem } from '@/lib/planner/catalog'
 import { fmtMoney } from '@/lib/planner/capacity'
@@ -15,10 +15,15 @@ import { cn } from '@/lib/utils'
 export default function ItemContextMenu() {
   const ctxMenu = usePlanner((s) => s.ctxMenu)
   const items = usePlanner((s) => s.items)
+  const selectedUids = usePlanner((s) => s.selectedUids)
   const closeContextMenu = usePlanner((s) => s.closeContextMenu)
   const rotateItem = usePlanner((s) => s.rotateItem)
   const duplicateItem = usePlanner((s) => s.duplicateItem)
   const removeItem = usePlanner((s) => s.removeItem)
+  const rotateItems = usePlanner((s) => s.rotateItems)
+  const duplicateItems = usePlanner((s) => s.duplicateItems)
+  const removeItems = usePlanner((s) => s.removeItems)
+  const selectMany = usePlanner((s) => s.selectMany)
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -41,8 +46,8 @@ export default function ItemContextMenu() {
   // keep the menu inside the window when right-clicking near an edge
   const pos = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
   if (ctxMenu) {
-    const W = 208
-    const H = 176
+    const W = 224
+    const H = 236
     pos.current = {
       x: Math.min(ctxMenu.x, window.innerWidth - W - 10),
       y: Math.min(ctxMenu.y, window.innerHeight - H - 10),
@@ -54,6 +59,11 @@ export default function ItemContextMenu() {
   if (!ctxMenu || !item || !cat) return null
 
   const custom = item.price !== undefined && item.price !== cat.price
+  // right-clicking a member of the multi-selection acts on the whole group
+  const isGroup = selectedUids.includes(item.uid) && selectedUids.length > 1
+  const targets = isGroup ? selectedUids : [item.uid]
+  const sameType = items.filter((i) => i.id === item.id)
+  const canSelectType = sameType.length > 1
 
   function onOutside(e: PointerEvent) {
     if (menuRef.current && e.target instanceof Node && menuRef.current.contains(e.target)) return
@@ -71,12 +81,25 @@ export default function ItemContextMenu() {
     >
       {/* header */}
       <div className="flex items-center justify-between gap-2 px-2.5 pb-1.5 pt-1">
-        <span className="truncate font-display text-xs font-bold tracking-tight text-charcoal">{cat.name}</span>
+        <span className="truncate font-display text-xs font-bold tracking-tight text-charcoal">
+          {isGroup ? `${targets.length} pieces` : cat.name}
+        </span>
         <span className="shrink-0 font-display text-[11px] font-semibold tabular-nums" style={{ color: usePlanner.getState().brandColor }}>
-          {fmtMoney(item.price ?? cat.price)}
+          {isGroup
+            ? fmtMoney(targets.reduce((sum, uid) => {
+                const it = items.find((i) => i.uid === uid)
+                const c = it ? getItem(it.id) : null
+                return sum + (it && c ? (it.price ?? c.price) : 0)
+              }, 0))
+            : fmtMoney(item.price ?? cat.price)}
         </span>
       </div>
-      {custom && (
+      {isGroup && (
+        <div className="mx-1.5 mb-1 rounded-md bg-stone-100/80 px-2 py-1 text-[10px] font-medium text-stone-500">
+          Actions apply to every selected piece
+        </div>
+      )}
+      {custom && !isGroup && (
         <div className="mx-1.5 mb-1 rounded-md bg-amber-100/70 px-2 py-1 text-[10px] font-medium text-amber-800">
           Custom price — differs from list
         </div>
@@ -85,40 +108,55 @@ export default function ItemContextMenu() {
 
       <MenuItem
         icon={<RotateCw className="h-3.5 w-3.5" />}
-        label="Rotate 90°"
+        label={isGroup ? 'Rotate all 90°' : 'Rotate 90°'}
         hint="R"
         onClick={() => {
-          rotateItem(item.uid)
+          if (isGroup) rotateItems(targets)
+          else rotateItem(item.uid)
           closeContextMenu()
         }}
       />
       <MenuItem
         icon={<Copy className="h-3.5 w-3.5" />}
-        label="Duplicate"
+        label={isGroup ? 'Duplicate all' : 'Duplicate'}
         hint="D"
         onClick={() => {
-          duplicateItem(item.uid)
+          if (isGroup) duplicateItems(targets)
+          else duplicateItem(item.uid)
           closeContextMenu()
         }}
       />
-      <MenuItem
-        icon={<DollarSign className="h-3.5 w-3.5" />}
-        label={custom ? 'Reset price' : 'Edit price'}
-        onClick={() => {
-          // jump straight into the price popover via selection controls
-          usePlanner.getState().select(item.uid)
-          closeContextMenu()
-          window.dispatchEvent(new CustomEvent('forma:edit-price', { detail: { uid: item.uid } }))
-        }}
-      />
+      {!isGroup && (
+        <MenuItem
+          icon={<DollarSign className="h-3.5 w-3.5" />}
+          label={custom ? 'Reset price' : 'Edit price'}
+          onClick={() => {
+            // jump straight into the price popover via selection controls
+            usePlanner.getState().select(item.uid)
+            closeContextMenu()
+            window.dispatchEvent(new CustomEvent('forma:edit-price', { detail: { uid: item.uid } }))
+          }}
+        />
+      )}
+      {!isGroup && canSelectType && (
+        <MenuItem
+          icon={<BoxSelect className="h-3.5 w-3.5" />}
+          label={`Select all ${sameType.length} ${cat.name}s`}
+          onClick={() => {
+            selectMany(sameType.map((i) => i.uid))
+            closeContextMenu()
+          }}
+        />
+      )}
       <div className="mx-1 my-1 h-px bg-stone-200/80" aria-hidden />
       <MenuItem
         icon={<Trash2 className="h-3.5 w-3.5" />}
-        label="Remove"
+        label={isGroup ? 'Remove all' : 'Remove'}
         hint="Del"
         destructive
         onClick={() => {
-          removeItem(item.uid)
+          if (isGroup) removeItems(targets)
+          else removeItem(item.uid)
           closeContextMenu()
         }}
       />

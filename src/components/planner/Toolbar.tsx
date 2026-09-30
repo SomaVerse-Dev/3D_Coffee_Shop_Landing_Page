@@ -1,6 +1,6 @@
 'use client'
 
-import { Box, Calculator, CircleHelp, DoorOpen, FileDown, Keyboard, LayoutGrid, LayoutTemplate, Link2, Map, PenLine, Redo2, Ruler, SwatchBook, TriangleAlert, Undo2 } from 'lucide-react'
+import { Box, Calculator, CircleHelp, DoorOpen, FileDown, Keyboard, LayoutGrid, LayoutTemplate, Link2, Map, PenLine, Pentagon, Redo2, Ruler, SwatchBook, TriangleAlert, Undo2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -46,7 +46,12 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
   const measureMode = usePlanner((s) => s.measureMode)
   const measureA = usePlanner((s) => s.measureA)
   const measureB = usePlanner((s) => s.measureB)
+  const measureTarget = usePlanner((s) => s.measureTarget)
+  const areaPts = usePlanner((s) => s.areaPts)
+  const areaClosed = usePlanner((s) => s.areaClosed)
   const setMeasureMode = usePlanner((s) => s.setMeasureMode)
+  const setMeasureTarget = usePlanner((s) => s.setMeasureTarget)
+  const stopMeasure = usePlanner((s) => s.stopMeasure)
   const brandColor = usePlanner((s) => s.brandColor)
   const setBrandColor = usePlanner((s) => s.setBrandColor)
   const items = usePlanner((s) => s.items)
@@ -205,23 +210,29 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
           <Switch checked={showFire} onCheckedChange={toggleFire} aria-label="Show fire safety egress" />
         </label>
 
-        {/* measure tool */}
+        {/* measure tool: distance + area as a joined pair (zones family) */}
         <Tooltip>
           <TooltipTrigger asChild>
             <button
-              onClick={() => setMeasureMode(!measureMode)}
-              aria-pressed={measureMode}
-              aria-label={measureMode ? 'Exit measure tool' : 'Measure distances on the floor'}
-              title={measureMode ? 'Exit measure tool (Esc)' : 'Measure distances (M)'}
+              onClick={() => {
+                if (measureMode && measureTarget === 'distance') stopMeasure()
+                else {
+                  setMeasureMode(true)
+                  setMeasureTarget('distance')
+                }
+              }}
+              aria-pressed={measureMode && measureTarget === 'distance'}
+              aria-label="Measure distances on the floor"
+              title={measureMode && measureTarget === 'distance' ? 'Exit distance measure (Esc)' : 'Measure distances (M)'}
               className={cn(
-                'flex h-9 items-center gap-1.5 rounded-lg border px-2.5 shadow-xs transition-all duration-150',
-                measureMode
+                'flex h-9 items-center gap-1.5 rounded-l-lg border px-2.5 shadow-xs transition-all duration-150',
+                measureMode && measureTarget === 'distance'
                   ? 'border-charcoal/30 bg-charcoal/[0.06] text-charcoal'
                   : 'border-stone-300/80 bg-white text-stone-400 hover:border-stone-400/70 hover:text-charcoal',
               )}
             >
-              <Ruler className={cn('h-4 w-4 transition-colors', measureMode && 'text-charcoal')} />
-              {measureMode && measureA && measureB && (
+              <Ruler className={cn('h-4 w-4 transition-colors', measureMode && measureTarget === 'distance' && 'text-charcoal')} />
+              {measureMode && measureTarget === 'distance' && measureA && measureB && (
                 <span className="hidden text-[10px] font-bold tabular-nums text-charcoal 2xl:inline">
                   {Math.hypot(measureB.x - measureA.x, measureB.z - measureA.z).toFixed(2)}
                 </span>
@@ -229,11 +240,47 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
             </button>
           </TooltipTrigger>
           <TooltipContent side="bottom" className="text-xs">
-            {measureMode
+            {measureMode && measureTarget === 'distance'
               ? measureA && measureB
                 ? 'Measured — click again to re-measure, Esc to exit'
                 : 'Click two points on the floor'
               : 'Measure distances on the floor (M)'}
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => {
+                if (measureMode && measureTarget === 'area') stopMeasure()
+                else {
+                  setMeasureMode(true)
+                  setMeasureTarget('area')
+                }
+              }}
+              aria-pressed={measureMode && measureTarget === 'area'}
+              aria-label="Measure floor area with a polygon"
+              title="Measure floor area — click vertices, Enter closes"
+              className={cn(
+                '-ml-2 flex h-9 items-center gap-1.5 rounded-r-lg border border-l-0 px-2.5 shadow-xs transition-all duration-150',
+                measureMode && measureTarget === 'area'
+                  ? 'border-charcoal/30 bg-charcoal/[0.06] text-charcoal'
+                  : 'border-stone-300/80 bg-white text-stone-400 hover:border-stone-400/70 hover:text-charcoal',
+              )}
+            >
+              <Pentagon className={cn('h-4 w-4 transition-colors', measureMode && measureTarget === 'area' && 'text-charcoal')} />
+              {measureMode && measureTarget === 'area' && areaPts.length >= 3 && (
+                <span className="hidden text-[10px] font-bold tabular-nums text-charcoal 2xl:inline">
+                  {areaPts.length} pts
+                </span>
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">
+            {measureMode && measureTarget === 'area'
+              ? areaClosed
+                ? 'Area measured — click again to trace a new one, Esc to exit'
+                : 'Click vertices · Enter or click the first point to close'
+              : 'Measure floor area with a polygon'}
           </TooltipContent>
         </Tooltip>
 

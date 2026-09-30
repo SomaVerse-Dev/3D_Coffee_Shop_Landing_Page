@@ -12,6 +12,8 @@ interface PlanSVGProps {
   showFire?: boolean
   detailed?: boolean
   selectedUid?: string | null
+  /** every selected uid (multi-selection) — members get a lighter highlight */
+  selectedUids?: string[] | null
   className?: string
   transparentPaper?: boolean
   /** glyph coloring: brand color everywhere, or one color per furniture category */
@@ -29,7 +31,7 @@ const PATH_GREEN = '#16A34A'
 
 /** 2D architectural plan, coordinates in meters (SVG user units). */
 export default function PlanSVG({
-  room, items, brand, showFire = false, detailed = false, selectedUid = null, className, transparentPaper = false, palette = 'brand', zones, showZones = false, refCb,
+  room, items, brand, showFire = false, detailed = false, selectedUid = null, selectedUids = null, className, transparentPaper = false, palette = 'brand', zones, showZones = false, refCb,
 }: PlanSVGProps) {
   const { w, d } = room
   const pad = detailed ? 1.15 : 0.55
@@ -136,8 +138,10 @@ export default function PlanSVG({
               : cat.shape === 'counter'
                 ? INK
                 : '#E7DFC9'
-        const stroke = selectedUid === it.uid ? brand : INK
-        const sw = selectedUid === it.uid ? 0.07 : 0.032
+        const isPrimary = selectedUid === it.uid
+        const isMember = !isPrimary && !!selectedUids?.includes(it.uid)
+        const stroke = isPrimary || isMember ? brand : INK
+        const sw = isPrimary ? 0.07 : isMember ? 0.05 : 0.032
         return (
           <g key={it.uid} transform={`translate(${it.x} ${it.z}) rotate(${deg})`}>
             {cat.shape === 'circle' ? (

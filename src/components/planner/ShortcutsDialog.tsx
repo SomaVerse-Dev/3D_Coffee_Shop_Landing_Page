@@ -22,7 +22,16 @@ const SHORTCUTS: Array<{ group: string; rows: ShortcutRow[] }> = [
       { keys: ['R'], action: 'Rotate the selected piece 90°' },
       { keys: ['D'], action: 'Duplicate the selected piece' },
       { keys: ['Del'], action: 'Remove the selected piece' },
-      { keys: ['Right-click'], action: 'Quick actions on any piece' },
+      { keys: ['Right-click'], action: 'Quick actions · select all of a type' },
+    ],
+  },
+  {
+    group: 'Selection',
+    rows: [
+      { keys: ['⇧', 'Click'], action: 'Add / remove a piece from the selection' },
+      { keys: ['Ctrl', 'A'], action: 'Select every piece on the floor' },
+      { keys: ['↑↓←→'], action: 'Nudge the whole selection (2+ pieces)' },
+      { keys: ['R / D / Del'], action: 'Rotate · duplicate · delete the group' },
     ],
   },
   {
@@ -35,6 +44,13 @@ const SHORTCUTS: Array<{ group: string; rows: ShortcutRow[] }> = [
       { keys: ['+'], action: 'Zoom in' },
       { keys: ['−'], action: 'Zoom out' },
       { keys: ['Esc'], action: 'Cancel placement / measuring / deselect' },
+    ],
+  },
+  {
+    group: 'Area measure',
+    rows: [
+      { keys: ['Enter'], action: 'Close the area polygon and read the m²' },
+      { keys: ['⌫'], action: 'Step back one vertex while tracing' },
     ],
   },
   {
