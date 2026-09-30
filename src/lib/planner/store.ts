@@ -46,6 +46,8 @@ interface PlannerState {
   planOpen: boolean
   projectName: string
   templateId: TemplateId | 'custom'
+  /** optional fit-out budget in USD (device-local preference, not part of layout snapshots) */
+  budget: number | null
   /** mirrors of the module-level history lengths so the UI can react */
   undoDepth: number
   redoDepth: number
@@ -73,6 +75,8 @@ interface PlannerState {
   setPlanOpen: (open: boolean) => void
   setBrandColor: (color: string) => void
   setProjectName: (name: string) => void
+  /** set the fit-out budget in USD (null clears it) */
+  setBudget: (usd: number | null) => void
   loadTemplate: (id: TemplateId) => void
   clearAll: () => void
   /** replace the whole layout (undo/redo, saved layouts, share links) */
@@ -132,6 +136,7 @@ export const usePlanner = create<PlannerState>()(
       planOpen: true,
       projectName: TEMPLATES.cafe.projectName,
       templateId: 'cafe',
+      budget: null,
       undoDepth: 0,
       redoDepth: 0,
       ctxMenu: null,
@@ -256,6 +261,11 @@ export const usePlanner = create<PlannerState>()(
       },
       setProjectName: (name) => set({ projectName: name }),
 
+      setBudget: (usd) =>
+        set({
+          budget: usd === null ? null : Math.max(0, Math.min(2_000_000, Math.round(usd))),
+        }),
+
       loadTemplate: (id) => {
         pushHistory(get(), 'template')
         set(() => {
@@ -343,6 +353,7 @@ export const usePlanner = create<PlannerState>()(
         brandColor: s.brandColor,
         projectName: s.projectName,
         templateId: s.templateId,
+        budget: s.budget,
       }),
     },
   ),

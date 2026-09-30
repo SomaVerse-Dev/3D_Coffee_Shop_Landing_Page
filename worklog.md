@@ -147,3 +147,32 @@ Stage Summary:
 - v1.2: Night-Studio dark theme (UI + 3D scene), right-click item actions, camera zoom/re-frame with keyboard shortcuts, per-item price overrides with live cost integration.
 - Files: src/app/{globals.css,layout.tsx,page.tsx}; src/components/{theme-provider.tsx,theme-toggle.tsx}; src/components/planner/{Scene.tsx,PlannerWorkspace.tsx,ItemContextMenu.tsx,ViewControls.tsx,ViewportHud.tsx,CostPanel.tsx,sections.tsx}; src/lib/planner/{store.ts,types.ts,capacity.ts}.
 - Next-round ideas (priority): public gallery of shared layouts (server-rendered + OG image), multi-room/zones, layout diff history panel, per-category budget caps, drag-from-catalog ghost improvements, a11y pass on 3D canvas (focusable viewport with roving instructions).
+
+---
+Task ID: 7
+Agent: Z.ai Code (cron webDevReview)
+Task: Round 3 — QA sweep (desktop+mobile) + Budget guardrails + Community gallery + CSV BOM + Shortcuts dialog
+
+Work Log:
+- Status assessment: v1.2 was stable (lint 0 errors, GET / 200). agent-browser sweep at 1440x900 + 390x844 re-verified all v1 features: fire toggle, plan/3D swing, brand recolor, cost math ($20,460), export build-up + PDF download, sections, footer, 0px mobile overflow.
+- Environment traps hit & solved (document for future rounds):
+  (a) Stale-cache ghosts: browser sessions that survive dev-server restarts serve old Turbopack chunks from HTTP cache — earlier "ThemeProvider is not defined" / "APRON_COLOR is not defined" / "getItem is not defined" errors were ALL this. Fix = agent-browser close + reopen (fresh session) after any dev-server restart; sources were never wrong.
+  (b) Dev server died mid-round (silent, likely supervisor cycle) → restarted via `nohup bun run dev >> dev.log 2>&1 &`; also did one full `rm -rf .next` rebuild to rule out cache corruption.
+- Budget guardrails (feature):
+  - store.ts: `budget: number | null` + setBudget() (clamped 0..2M), persisted via partialize (device-local; NOT in layout snapshots/undo).
+  - capacity.ts: computeCategoryBreakdown() (spend by category, server-safe), CATEGORY_META colors, budgetStatusOf() → under/close/over at 90%/100%.
+  - CostPanel.tsx: Budget guardrail card (input + 15k/25k/40k/60k presets + Clear), animated progress bar with role=progressbar, status chip, "over by $X" readout; Spend-by-category stacked ribbon + legend rows; Estimated total turns red when over.
+  - Toolbar.tsx: cost pill reacts — amber border when ≥90%, red tint + TriangleAlert icon + red amount when over, "/ budget" hint at 2xl.
+- Community gallery (feature): `CommunityGallery` in sections.tsx, mounted between CapacityGuide and BrandStrip; nav links (header + footer) added. Cards = SVG-plan thumbnail, venue chip (from VENUES via templateId), m² badge, seats/items meta, relative save time, "Open in the studio" → GET /api/layouts/[id] → applySnapshot + toast + smooth scroll to #planner. Live refresh via `forma:layouts-changed` window event (dispatched by LayoutsMenu on save/delete) + manual Refresh button; skeleton + dashed empty states; whileInView stagger animations.
+- API: GET /api/layouts now also returns seats (via catalog), areaM2, templateId per row (single-call gallery data; safeParse fallback keeps old rows working).
+- CSV BOM (feature): "BOM · CSV" button in CostPanel downloads a bill-of-materials (meta header w/ project/template/area/seats/date, line items w/ pricing flag, subtotal/install/contingency/total/budget) via Blob+a.click; slugified filename.
+- Shortcuts dialog (feature): ShortcutsDialog.tsx — "?" toggles a grouped cheat-sheet (Items/View/Session) with kbd chips; NEW keyboard shortcuts: 1 = plan view, 2 = 3D view (wired in PlannerWorkspace); tip line under workspace now advertises "?".
+- Seed data: scripts/seed-community.ts (bun + Prisma) — 6 curated layouts from templates + variations (Roastery lounge, Harbor Bakery, extra booths, desk cluster), inline SVG plan thumbnails (blueprint grid, glyph shapes in brand color, walls w/ door gaps); guarded to no-op when table non-empty. DB has 6 rows.
+- Styling details: community cards hover-lift + image zoom + brand-dot chips; budget bars w/ inset-track shadows + 500ms eased fills; preset chips with active charcoal state; glassy dialog header; nav "Community" link. Dark mode verified re-theming the new section (thumbnails intentionally stay light "paper on dark desk").
+- E2E verified via agent-browser: budget 25k/15k → Over ($3,896 / $13,896 over) red states; 40k → Under emerald 72%; pill red+alert at 15k; BOM CSV click clean (0 errors); "Open Bistro Verde in the studio" → 42 items/43 seats/toast/scroll; save "QA Round 7 Budget Test" → community card appeared instantly (event); DELETE via API 200; 1/2 keys swing views; mobile 390 = 0px overflow; lint 0 errors; 0 page errors on fresh session; test row deleted, template/budget/brand reset to defaults.
+
+Stage Summary:
+- v1.3: budget guardrails (panel + toolbar + CSV), community gallery wall (API-backed, seeded, live-refresh), keyboard shortcut sheet + 1/2 view keys.
+- Files: src/lib/planner/{store.ts,capacity.ts}; src/components/planner/{CostPanel.tsx,Toolbar.tsx,sections.tsx,LayoutsMenu.tsx,PlannerWorkspace.tsx,ShortcutsDialog.tsx (new)}; src/app/api/layouts/route.ts; src/app/page.tsx; scripts/seed-community.ts (new).
+- Known nits/risks: dev-server restarts strand long-lived browser sessions on stale cached chunks (QA-only, not user-facing); dev-tools "1 Issue" badge = benign THREE.Clock/PCFSoftShadowMap deprecation warnings (dev-only); seeded thumbs are SVG data-URLs (light paper look in dark mode is intentional).
+- Next-round ideas (priority): per-category budget caps; zone/area tints; layout diff history panel; OG meta + share-preview polish; a11y pass on 3D canvas (roving instructions, focusable viewport); prune seeded rows w/ a /api/layouts?limit param if gallery gets crowded.

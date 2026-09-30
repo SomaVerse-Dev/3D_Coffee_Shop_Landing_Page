@@ -11,6 +11,12 @@ import { usePlanner, type LayoutSnapshot } from '@/lib/planner/store'
 import { renderThumbnail } from '@/lib/planner/thumbnail'
 import { cn } from '@/lib/utils'
 
+const LAYOUTS_CHANGED_EVENT = 'forma:layouts-changed'
+
+function notifyLayoutsChanged() {
+  window.dispatchEvent(new Event(LAYOUTS_CHANGED_EVENT))
+}
+
 interface SavedLayoutRow {
   id: string
   name: string
@@ -76,6 +82,7 @@ export default function LayoutsMenu() {
       setSaveName('')
       setJustSavedId(json.layout?.id ?? null)
       toast({ title: 'Layout saved', description: `“${name}” is in your library.` })
+      notifyLayoutsChanged()
       await load()
     } catch {
       toast({ title: 'Save failed', description: 'Please try again in a moment.', variant: 'destructive' })
@@ -112,6 +119,7 @@ export default function LayoutsMenu() {
       if (!res.ok) throw new Error('delete failed')
       setRows((r) => (r ? r.filter((x) => x.id !== id) : r))
       toast({ title: 'Layout deleted' })
+      notifyLayoutsChanged()
     } catch {
       toast({ title: 'Could not delete layout', variant: 'destructive' })
     }

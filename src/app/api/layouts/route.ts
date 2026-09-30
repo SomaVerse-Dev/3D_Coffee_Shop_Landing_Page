@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
+import { getItem } from '@/lib/planner/catalog'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,14 +45,20 @@ export async function GET() {
       },
     })
     return NextResponse.json({
-      layouts: rows.map((r) => ({
-        id: r.id,
-        name: r.name,
-        brandColor: r.brandColor,
-        thumb: r.thumb,
-        updatedAt: r.updatedAt.toISOString(),
-        itemCount: safeCount(r.data),
-      })),
+      layouts: rows.map((r) => {
+        const parsed = safeParse(r.data)
+        return {
+          id: r.id,
+          name: r.name,
+          brandColor: r.brandColor,
+          thumb: r.thumb,
+          updatedAt: r.updatedAt.toISOString(),
+          itemCount: parsed?.items.length ?? 0,
+          seats: parsed?.seats ?? 0,
+          areaM2: parsed?.areaM2 ?? 0,
+          templateId: parsed?.templateId ?? 'custom',
+        }
+      }),
     })
   } catch (err) {
     console.error('GET /api/layouts failed', err)
@@ -90,5 +97,31 @@ function safeCount(dataJson: string): number {
     return Array.isArray(parsed.items) ? parsed.items.length : 0
   } catch {
     return 0
+  }
+}
+
+interface ParsedSnapshot {
+  items: Array<{ id: string }>
+  seats: number
+  areaM2: number
+  templateId: string
+}
+
+function safeParse(dataJson: string): ParsedSnapshot | null {
+  try {
+    const parsed = JSON.parse(dataJson) as {
+      items?: Array<{ id: string }>
+      room?: { w?: number; d?: number }
+      templateId?: string
+    }
+    const items = Array.isArray(parsed.items) ? parsed.items : []
+    const w = typeof parsed.room?.w === 'number' ? parsed.room.w : 0
+    const d = typeof parsed.room?.d === 'number' ? parsed.room.d : 0
+    // seat count via the shared catalog (server-safe, no DOM)
+    let seats = 0
+    for (const it of items) seats += getItem(it.id)?.seats ?? 0
+    return { items, seats, areaM2: w * d, templateId: parsed.templateId ?? 'custom' }
+  } catch {
+    return null
   }
 }

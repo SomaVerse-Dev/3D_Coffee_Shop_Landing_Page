@@ -1,4 +1,4 @@
-import type { PlacedItem, RoomSpec, TemplateId } from './types'
+import type { Category, PlacedItem, RoomSpec, TemplateId } from './types'
 import { getItem } from './catalog'
 
 export type CapacityStatus = 'ok' | 'tight' | 'over'
@@ -113,6 +113,56 @@ export function computeCost(items: PlacedItem[]): CostReport {
 
 export function fmtMoney(n: number): string {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
+}
+
+// ─── Category breakdown (cost panel bars) ──────────────────────────────────
+
+export const CATEGORY_META: Record<Category, { label: string; color: string }> = {
+  seating: { label: 'Seating', color: '#8C6A4F' },
+  tables: { label: 'Tables & desks', color: '#B0946F' },
+  counters: { label: 'Counters & service', color: '#5F6B5C' },
+  fixtures: { label: 'Fixtures', color: '#A8552F' },
+  decor: { label: 'Decor & lighting', color: '#C9A227' },
+}
+
+const CATEGORY_ORDER: Category[] = ['seating', 'tables', 'counters', 'fixtures', 'decor']
+
+export interface CategorySlice {
+  category: Category
+  label: string
+  color: string
+  total: number
+  /** share of subtotal 0..1 */
+  pct: number
+}
+
+/** Spend grouped by furniture category, biggest first (0-value categories dropped). */
+export function computeCategoryBreakdown(items: PlacedItem[]): CategorySlice[] {
+  const sub = computeCost(items).subtotal
+  if (sub <= 0) return []
+  const totals = new Map<Category, number>()
+  for (const it of items) {
+    const cat = getItem(it.id)
+    if (!cat) continue
+    const unit = it.price ?? cat.price
+    totals.set(cat.category, (totals.get(cat.category) ?? 0) + unit)
+  }
+  return CATEGORY_ORDER.filter((c) => (totals.get(c) ?? 0) > 0).map((c) => ({
+    category: c,
+    label: CATEGORY_META[c].label,
+    color: CATEGORY_META[c].color,
+    total: totals.get(c) ?? 0,
+    pct: (totals.get(c) ?? 0) / sub,
+  })).sort((a, b) => b.total - a.total)
+}
+
+/** Where the spend sits relative to the user's budget. */
+export type BudgetStatus = 'under' | 'close' | 'over'
+
+export function budgetStatusOf(total: number, budget: number): { status: BudgetStatus; pct: number } {
+  const pct = budget > 0 ? total / budget : 0
+  const status: BudgetStatus = pct > 1 ? 'over' : pct >= 0.9 ? 'close' : 'under'
+  return { status, pct }
 }
 
 export const STATUS_META: Record<CapacityStatus, { label: string; className: string; dot: string }> = {

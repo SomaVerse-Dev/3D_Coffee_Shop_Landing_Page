@@ -1,6 +1,6 @@
 import { ArrowDown, Compass, DraftingCompass, Flame, Users } from 'lucide-react'
 import PlannerWorkspace from '@/components/planner/PlannerWorkspace'
-import { BrandStrip, CapacityGuide, TemplateGallery } from '@/components/planner/sections'
+import { BrandStrip, CapacityGuide, CommunityGallery, TemplateGallery } from '@/components/planner/sections'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
 
@@ -25,6 +25,7 @@ export default function Home() {
               ['#templates', 'Templates'],
               ['#capacity', 'Capacity'],
               ['#brand', 'Brand'],
+              ['#community', 'Community'],
             ].map(([href, label]) => (
               <a
                 key={href}
@@ -99,12 +100,14 @@ export default function Home() {
             <kbd className="ml-1 rounded border border-stone-300 bg-white px-1 font-mono text-[10px] shadow-xs">D</kbd> duplicate ·
             <kbd className="ml-1 rounded border border-stone-300 bg-white px-1 font-mono text-[10px] shadow-xs">Del</kbd> remove ·
             <kbd className="ml-1 rounded border border-stone-300 bg-white px-1 font-mono text-[10px] shadow-xs">F</kbd> re-frame ·
+            <kbd className="ml-1 rounded border border-stone-300 bg-white px-1 font-mono text-[10px] shadow-xs">?</kbd> all shortcuts ·
             right-click any piece for quick actions.
           </p>
         </section>
 
         <TemplateGallery />
         <CapacityGuide />
+        <CommunityGallery />
         <BrandStrip />
       </main>
 
@@ -132,6 +135,7 @@ export default function Home() {
                 ['#planner', 'Workspace'],
                 ['#templates', 'Templates'],
                 ['#capacity', 'Capacity planner'],
+                ['#community', 'Community floorplans'],
                 ['#brand', 'Brand color'],
               ].map(([href, label]) => (
                 <li key={href}>

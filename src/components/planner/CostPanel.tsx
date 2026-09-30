@@ -1,22 +1,103 @@
 'use client'
 
-import { Calculator, Info, PenLine } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import {
+  Calculator, Download, Info, Landmark, PenLine, Target, TriangleAlert, Wallet,
+} from 'lucide-react'
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
 } from '@/components/ui/sheet'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { usePlanner } from '@/lib/planner/store'
-import { computeCost, fmtMoney } from '@/lib/planner/capacity'
+import { getItem } from '@/lib/planner/catalog'
+import {
+  budgetStatusOf, computeCategoryBreakdown, computeCost, fmtMoney, VENUES,
+} from '@/lib/planner/capacity'
+import { TEMPLATES } from '@/lib/planner/templates'
 import { cn } from '@/lib/utils'
+
+const BUDGET_PRESETS = [15_000, 25_000, 40_000, 60_000]
+
+const BUDGET_META = {
+  under: { label: 'Under budget', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200', bar: 'bg-emerald-500' },
+  close: { label: 'Close to budget', cls: 'bg-amber-100 text-amber-800 border-amber-200', bar: 'bg-amber-500' },
+  over: { label: 'Over budget', cls: 'bg-red-100 text-red-700 border-red-200', bar: 'bg-red-500' },
+} as const
+
+/** Build and download a bill-of-materials CSV for the current layout. */
+function downloadBomCsv(
+  projectName: string, templateId: string, areaM2: number, seats: number,
+  lines: Array<{ name: string; qty: number; unit: number; total: number; custom?: boolean }>,
+  subtotal: number, install: number, contingency: number, total: number, budget: number | null,
+) {
+  const esc = (v: string | number) => {
+    const s = String(v)
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  const rows: string[] = []
+  rows.push('FORMA — Bill of materials')
+  rows.push(`Project,${esc(projectName || 'Untitled layout')}`)
+  rows.push(`Template,${esc(templateId === 'custom' ? 'Custom layout' : TEMPLATES[templateId as 'cafe']?.name ?? templateId)}`)
+  rows.push(`Floor area,${areaM2.toFixed(1)} m2`)
+  rows.push(`Seats,${seats}`)
+  rows.push(`Exported,${new Date().toISOString().slice(0, 10)}`)
+  rows.push('')
+  rows.push('Item,Qty,Unit price (USD),Line total (USD),Pricing')
+  for (const l of lines) {
+    rows.push([esc(l.name), l.qty, l.unit, l.total, l.custom ? 'custom' : 'catalog'].join(','))
+  }
+  rows.push('')
+  rows.push(`Subtotal,,,${subtotal},`)
+  rows.push(`Delivery & install (12%),,,${install},`)
+  rows.push(`Contingency (8%),,,${contingency},`)
+  rows.push(`Estimated total,,,${total},`)
+  if (budget !== null) rows.push(`Budget,,,${budget},`)
+  const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  const slug = (projectName || 'layout').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'layout'
+  a.href = url
+  a.download = `forma-bom-${slug}.csv`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 4000)
+}
 
 export default function CostPanel() {
   const costOpen = usePlanner((s) => s.costOpen)
   const setCostOpen = usePlanner((s) => s.setCostOpen)
   const items = usePlanner((s) => s.items)
+  const room = usePlanner((s) => s.room)
   const brand = usePlanner((s) => s.brandColor)
+  const templateId = usePlanner((s) => s.templateId)
+  const projectName = usePlanner((s) => s.projectName)
+  const budget = usePlanner((s) => s.budget)
+  const setBudget = usePlanner((s) => s.setBudget)
+
+  const [budgetDraft, setBudgetDraft] = useState('')
   const cost = computeCost(items)
   const hasCustom = cost.lines.some((l) => (l as { custom?: boolean }).custom)
+  const slices = useMemo(() => computeCategoryBreakdown(items), [items])
+
+  // seat count via catalog
+  const seatCount = useMemo(() => {
+    let n = 0
+    for (const it of items) {
+      const cat = getItem(it.id)
+      if (cat) n += cat.seats
+    }
+    return n
+  }, [items])
+
+  const budgetState = budget !== null ? budgetStatusOf(cost.total, budget) : null
+  const overBudget = budgetState?.status === 'over'
+
+  function commitBudget(raw: string) {
+    const n = Number(raw.replace(/[^0-9]/g, ''))
+    setBudget(raw.trim() === '' || Number.isNaN(n) || n <= 0 ? null : n)
+  }
 
   return (
     <Sheet open={costOpen} onOpenChange={setCostOpen}>
@@ -33,37 +114,169 @@ export default function CostPanel() {
 
         <ScrollArea className="min-h-0 flex-1">
           <div className="px-5 py-4">
-            {cost.lines.length === 0 ? (
-              <p className="py-10 text-center text-xs text-stone-400">
-                Place furniture to build your estimate.
-              </p>
-            ) : (
-              <ul className="space-y-1">
-                {cost.lines.map((l) => {
-                  const custom = (l as { custom?: boolean }).custom
-                  return (
-                    <li key={l.id} className="flex items-baseline justify-between gap-3 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-white/70">
-                      <span className="min-w-0 flex-1 truncate font-medium text-stone-700">
-                        {l.name}
-                        {l.qty > 1 && <span className="ml-1.5 text-stone-400">×{l.qty}</span>}
-                        {custom && (
-                          <span className="ml-1.5 inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide text-amber-800">
-                            <PenLine className="h-2.5 w-2.5" aria-hidden />
-                            custom
-                          </span>
-                        )}
-                      </span>
-                      <span className={cn('shrink-0 tabular-nums', custom ? 'font-medium text-amber-700' : 'text-stone-400')}>
-                        {fmtMoney(l.unit)}
-                      </span>
-                      <span className="w-20 shrink-0 text-right font-semibold tabular-nums text-charcoal">
-                        {fmtMoney(l.total)}
-                      </span>
+            {/* ── budget guardrail ─────────────────────────────────── */}
+            <section
+              aria-label="Budget guardrail"
+              className={cn(
+                'rounded-xl border bg-white/80 p-3.5 shadow-xs transition-colors',
+                overBudget ? 'border-red-300/80' : 'border-stone-200/80',
+              )}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+                  <Target className="h-3.5 w-3.5" style={{ color: brand }} />
+                  Budget guardrail
+                </p>
+                {budget !== null && (
+                  <button
+                    onClick={() => { setBudgetDraft(''); setBudget(null) }}
+                    className="rounded px-1.5 py-0.5 text-[10px] font-medium text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              <div className="mt-2.5 flex items-center gap-2">
+                <div className="relative flex-1">
+                  <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-stone-400">$</span>
+                  <input
+                    inputMode="numeric"
+                    value={budgetDraft || (budget !== null ? String(budget) : '')}
+                    onChange={(e) => setBudgetDraft(e.target.value)}
+                    onBlur={(e) => commitBudget(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') { commitBudget((e.target as HTMLInputElement).value); (e.target as HTMLInputElement).blur() }
+                    }}
+                    placeholder="Set a budget…"
+                    aria-label="Budget in US dollars"
+                    className={cn(
+                      'h-8 w-full rounded-lg border bg-white pl-6 pr-2 text-xs font-semibold tabular-nums text-charcoal shadow-xs outline-none transition-colors placeholder:font-normal placeholder:text-stone-300',
+                      overBudget ? 'border-red-300 focus:border-red-400' : 'border-stone-200 focus:border-stone-400',
+                    )}
+                  />
+                </div>
+                {BUDGET_PRESETS.map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => { setBudgetDraft(''); setBudget(p) }}
+                    aria-label={`Set budget ${p / 1000}k`}
+                    className={cn(
+                      'hidden h-8 shrink-0 rounded-lg border px-2 text-[10px] font-semibold tabular-nums transition-colors sm:block',
+                      budget === p
+                        ? 'border-charcoal bg-charcoal text-warmwhite'
+                        : 'border-stone-200 bg-white text-stone-500 hover:border-stone-300 hover:text-charcoal',
+                    )}
+                  >
+                    {p / 1000}k
+                  </button>
+                ))}
+              </div>
+
+              {budget !== null && budgetState && (
+                <div className="mt-3">
+                  <div
+                    role="progressbar"
+                    aria-valuenow={Math.round(Math.min(100, budgetState.pct * 100))}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label="Budget used"
+                    className="h-2 w-full overflow-hidden rounded-full bg-stone-100 shadow-[inset_0_1px_2px_rgba(46,43,38,0.08)]"
+                  >
+                    <div
+                      className={cn('h-full rounded-full transition-[width] duration-500 ease-out', BUDGET_META[budgetState.status].bar)}
+                      style={{ width: `${Math.min(100, budgetState.pct * 100)}%` }}
+                    />
+                  </div>
+                  <div className="mt-1.5 flex items-center justify-between text-[11px]">
+                    <span className={cn('inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold', BUDGET_META[budgetState.status].cls)}>
+                      {overBudget && <TriangleAlert className="h-3 w-3" aria-hidden />}
+                      {BUDGET_META[budgetState.status].label}
+                    </span>
+                    <span className="tabular-nums text-stone-500">
+                      <span className="font-semibold text-charcoal">{fmtMoney(cost.total)}</span>
+                      {' / '}
+                      {fmtMoney(budget)}
+                      {overBudget && (
+                        <span className="ml-1 font-semibold text-red-600">({fmtMoney(cost.total - budget)} over)</span>
+                      )}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </section>
+
+            {/* ── category breakdown ───────────────────────────────── */}
+            {slices.length > 0 && (
+              <section aria-label="Spend by category" className="mt-4">
+                <p className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+                  <Wallet className="h-3.5 w-3.5 text-stone-400" />
+                  Spend by category
+                </p>
+                {/* stacked ribbon */}
+                <div className="mt-2.5 flex h-2.5 w-full gap-px overflow-hidden rounded-full bg-stone-100 shadow-[inset_0_1px_2px_rgba(46,43,38,0.08)]" aria-hidden>
+                  {slices.map((s) => (
+                    <div
+                      key={s.category}
+                      className="h-full transition-[width] duration-500 ease-out"
+                      style={{ width: `${s.pct * 100}%`, backgroundColor: s.color }}
+                    />
+                  ))}
+                </div>
+                <ul className="mt-2.5 space-y-1">
+                  {slices.map((s) => (
+                    <li key={s.category} className="flex items-center gap-2 rounded-md px-1 py-0.5 text-[11px] transition-colors hover:bg-white/70">
+                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: s.color }} aria-hidden />
+                      <span className="min-w-0 flex-1 truncate font-medium text-stone-600">{s.label}</span>
+                      <span className="shrink-0 tabular-nums text-stone-400">{Math.round(s.pct * 100)}%</span>
+                      <span className="w-16 shrink-0 text-right font-semibold tabular-nums text-charcoal">{fmtMoney(s.total)}</span>
                     </li>
-                  )
-                })}
-              </ul>
+                  ))}
+                </ul>
+              </section>
             )}
+
+            {/* ── line items ───────────────────────────────────────── */}
+            <section aria-label="Line items" className="mt-4">
+              <p className="font-display flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+                <Landmark className="h-3.5 w-3.5 text-stone-400" />
+                Bill of materials
+                <span className="ml-auto font-sans text-[10px] font-medium normal-case tracking-normal text-stone-400">
+                  {cost.lines.length} {cost.lines.length === 1 ? 'line' : 'lines'}
+                </span>
+              </p>
+              {cost.lines.length === 0 ? (
+                <p className="py-8 text-center text-xs text-stone-400">
+                  Place furniture to build your estimate.
+                </p>
+              ) : (
+                <ul className="mt-2 space-y-1">
+                  {cost.lines.map((l) => {
+                    const custom = (l as { custom?: boolean }).custom
+                    return (
+                      <li key={l.id} className="flex items-baseline justify-between gap-3 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-white/70">
+                        <span className="min-w-0 flex-1 truncate font-medium text-stone-700">
+                          {l.name}
+                          {l.qty > 1 && <span className="ml-1.5 text-stone-400">×{l.qty}</span>}
+                          {custom && (
+                            <span className="ml-1.5 inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide text-amber-800">
+                              <PenLine className="h-2.5 w-2.5" aria-hidden />
+                              custom
+                            </span>
+                          )}
+                        </span>
+                        <span className={cn('shrink-0 tabular-nums', custom ? 'font-medium text-amber-700' : 'text-stone-400')}>
+                          {fmtMoney(l.unit)}
+                        </span>
+                        <span className="w-20 shrink-0 text-right font-semibold tabular-nums text-charcoal">
+                          {fmtMoney(l.total)}
+                        </span>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </section>
           </div>
         </ScrollArea>
 
@@ -81,9 +294,28 @@ export default function CostPanel() {
           )}
           <div className="flex items-baseline justify-between">
             <span className="font-display text-sm font-semibold text-charcoal">Estimated total</span>
-            <span className="font-display text-xl font-bold tabular-nums" style={{ color: brand }}>
+            <span className="font-display text-xl font-bold tabular-nums" style={{ color: overBudget ? '#B91C1C' : brand }}>
               {fmtMoney(cost.total)}
             </span>
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <Button2
+              disabled={cost.lines.length === 0}
+              onClick={() =>
+                downloadBomCsv(
+                  projectName, templateId, room.w * room.d, seatCount,
+                  cost.lines, cost.subtotal, cost.install, cost.contingency, cost.total, budget,
+                )
+              }
+            >
+              <Download className="h-3.5 w-3.5" />
+              BOM · CSV
+            </Button2>
+            <p className="flex-1 text-[10px] leading-snug text-stone-400">
+              {VENUES[templateId as 'cafe']
+                ? <>Venue assumption: {VENUES[templateId as 'cafe'].label.toLowerCase()} · {seatCount} {seatCount === 1 ? 'seat' : 'seats'}</>
+                : <>{seatCount} {seatCount === 1 ? 'seat' : 'seats'} · {cost.lines.length} {cost.lines.length === 1 ? 'line' : 'lines'}</>}
+            </p>
           </div>
           <p className="mt-3 flex items-start gap-1.5 text-[10.5px] leading-relaxed text-stone-400">
             <Info className="mt-px h-3 w-3 shrink-0" />
@@ -92,5 +324,18 @@ export default function CostPanel() {
         </div>
       </SheetContent>
     </Sheet>
+  )
+}
+
+/** tiny local button so the sheet stays dependency-light */
+function Button2({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-stone-300/80 bg-white px-2.5 text-[11px] font-semibold text-charcoal shadow-xs transition-colors hover:border-stone-400 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {children}
+    </button>
   )
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { Box, Calculator, DoorOpen, FileDown, LayoutTemplate, Link2, Map, Redo2, Ruler, SwatchBook, Undo2 } from 'lucide-react'
+import { Box, Calculator, DoorOpen, FileDown, LayoutTemplate, Link2, Map, Redo2, Ruler, SwatchBook, TriangleAlert, Undo2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -13,7 +13,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { useToast } from '@/hooks/use-toast'
 import { usePlanner } from '@/lib/planner/store'
 import { TEMPLATES, TEMPLATE_ORDER } from '@/lib/planner/templates'
-import { computeCost } from '@/lib/planner/capacity'
+import { budgetStatusOf, computeCost } from '@/lib/planner/capacity'
 import { BRAND_PRESETS, computedBrandName } from '@/lib/planner/brandNames'
 import { buildShareUrl } from '@/lib/planner/share'
 import { cn } from '@/lib/utils'
@@ -42,9 +42,11 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
   const undo = usePlanner((s) => s.undo)
   const redo = usePlanner((s) => s.redo)
   const getSnapshot = usePlanner((s) => s.getSnapshot)
+  const budget = usePlanner((s) => s.budget)
   const { toast } = useToast()
 
   const cost = computeCost(items)
+  const budgetState = budget !== null ? budgetStatusOf(cost.total, budget) : null
 
   function handleShare() {
     const url = buildShareUrl(getSnapshot())
@@ -284,15 +286,34 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
           <Button
             variant="outline"
             onClick={() => setCostOpen(true)}
-            aria-label="Open cost estimate"
-            title="Open cost estimate"
-            className="h-9 gap-1.5 rounded-full border-stone-300/80 bg-white pl-3 pr-3.5 text-xs font-medium shadow-xs transition-colors hover:border-stone-400/70 hover:bg-white"
+            aria-label={budgetState?.status === 'over' ? `Open cost estimate — ${compactMoney(cost.total)}, over budget` : 'Open cost estimate'}
+            title={budgetState ? `Budget: ${budgetState.status === 'over' ? 'over' : 'under'} — open the estimate` : 'Open cost estimate'}
+            className={cn(
+              'h-9 gap-1.5 rounded-full border bg-white pl-3 pr-3.5 text-xs font-medium shadow-xs transition-colors hover:bg-white',
+              budgetState?.status === 'over'
+                ? 'border-red-300 bg-red-50/70 hover:border-red-400'
+                : budgetState?.status === 'close'
+                  ? 'border-amber-300 bg-amber-50/70 hover:border-amber-400'
+                  : 'border-stone-300/80 hover:border-stone-400/70',
+            )}
           >
-            <Calculator className="h-3.5 w-3.5 text-stone-400" />
+            {budgetState?.status === 'over' ? (
+              <TriangleAlert className="h-3.5 w-3.5 text-red-500" />
+            ) : (
+              <Calculator className="h-3.5 w-3.5 text-stone-400" />
+            )}
             <span className="hidden md:inline">Cost</span>
-            <span className="font-display text-[13px] font-bold tabular-nums tracking-tight text-charcoal">
+            <span className={cn(
+              'font-display text-[13px] font-bold tabular-nums tracking-tight',
+              budgetState?.status === 'over' ? 'text-red-700' : 'text-charcoal',
+            )}>
               {compactMoney(cost.total)}
             </span>
+            {budget !== null && (
+              <span className="hidden border-l border-stone-200 pl-1.5 text-[10px] font-medium tabular-nums text-stone-400 2xl:inline">
+                / {compactMoney(budget)}
+              </span>
+            )}
           </Button>
           <Button
             onClick={onExport}

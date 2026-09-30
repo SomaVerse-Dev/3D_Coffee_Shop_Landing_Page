@@ -9,6 +9,7 @@ import CostPanel from './CostPanel'
 import ExportModal from './ExportModal'
 import ItemContextMenu from './ItemContextMenu'
 import ViewControls from './ViewControls'
+import ShortcutsDialog from './ShortcutsDialog'
 import { CapacityMeter } from './CapacityMeter'
 import { HintChip, PlanMinimap, SelectionControls } from './ViewportHud'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
@@ -42,6 +43,7 @@ export default function PlannerWorkspace() {
   const applySnapshot = usePlanner((s) => s.applySnapshot)
   const duplicateItem = usePlanner((s) => s.duplicateItem)
   const requestZoom = usePlanner((s) => s.requestZoom)
+  const setViewMode = usePlanner((s) => s.setViewMode)
   const { toast } = useToast()
 
   // rehydrate persisted state after mount (skipHydration is set in the store)
@@ -100,11 +102,15 @@ export default function PlannerWorkspace() {
         requestZoom('in')
       } else if ((e.key === '-' || e.key === '_') && !mod) {
         requestZoom('out')
+      } else if (e.key === '1' && !mod) {
+        setViewMode('plan')
+      } else if (e.key === '2' && !mod) {
+        setViewMode('3d')
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedUid, rotateItem, removeItem, duplicateItem, arm, select, undo, redo, requestZoom])
+  }, [selectedUid, rotateItem, removeItem, duplicateItem, arm, select, undo, redo, requestZoom, setViewMode])
 
   return (
     <div className="overflow-hidden rounded-2xl border border-stone-300/60 bg-card shadow-[0_24px_60px_-24px_rgba(46,43,38,0.35)]">
@@ -177,6 +183,7 @@ export default function PlannerWorkspace() {
 
       <CostPanel />
       <ExportModal open={exportOpen} onOpenChange={setExportOpen} />
+      <ShortcutsDialog />
     </div>
   )
 }
