@@ -1,0 +1,11 @@
+🚀 Initializing Z-AI SDK...
+🔎 Searching images: "cozy specialty coffee shop interior wooden counter espresso"
+❌ Image search failed: Network error: 400 Client Error: Bad Request for url: https://reader.psmoe.com/glm/s/serp/images
+{
+  "success": false,
+  "query": "cozy specialty coffee shop interior wooden counter espresso",
+  "count": 0,
+  "ranked": false,
+  "results": [],
+  "error": "Network error: 400 Client Error: Bad Request for url: https://reader.psmoe.com/glm/s/serp/images"
+}
