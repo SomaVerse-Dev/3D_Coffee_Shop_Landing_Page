@@ -6,6 +6,8 @@ import { getItem, halfExtents } from './catalog'
 import { TEMPLATES } from './templates'
 
 const SNAP = 0.05
+const HISTORY_LIMIT = 60
+const COALESCE_MS = 900
 
 export function snap(v: number): number {
   return Math.round(v / SNAP) * SNAP
@@ -23,6 +25,15 @@ export function clampToRoom(
   }
 }
 
+/** Serializable snapshot of everything a saved/shared layout needs. */
+export interface LayoutSnapshot {
+  room: RoomSpec
+  items: PlacedItem[]
+  brandColor: string
+  projectName: string
+  templateId: TemplateId | 'custom'
+}
+
 interface PlannerState {
   room: RoomSpec
   items: PlacedItem[]
@@ -35,6 +46,9 @@ interface PlannerState {
   planOpen: boolean
   projectName: string
   templateId: TemplateId | 'custom'
+  /** mirrors of the module-level history lengths so the UI can react */
+  undoDepth: number
+  redoDepth: number
 
   setRoom: (w: number, d: number) => void
   addItem: (catalogId: string, x: number, z: number) => void
@@ -52,11 +66,52 @@ interface PlannerState {
   setProjectName: (name: string) => void
   loadTemplate: (id: TemplateId) => void
   clearAll: () => void
+  /** replace the whole layout (undo/redo, saved layouts, share links) */
+  applySnapshot: (snap: LayoutSnapshot) => void
+  getSnapshot: () => LayoutSnapshot
+  undo: () => void
+  redo: () => void
 }
+
+// ─── Undo / redo history (module scope, coalesces rapid drags) ─────────────
+
+const past: LayoutSnapshot[] = []
+const future: LayoutSnapshot[] = []
+let lastPush: { type: string; t: number } = { type: '', t: 0 }
+
+function snapshotOf(s: {
+  room: RoomSpec; items: PlacedItem[]; brandColor: string
+  projectName: string; templateId: TemplateId | 'custom'
+}): LayoutSnapshot {
+  return {
+    room: { ...s.room },
+    items: s.items.map((i) => ({ ...i })),
+    brandColor: s.brandColor,
+    projectName: s.projectName,
+    templateId: s.templateId,
+  }
+}
+
+/** push current state onto the undo stack; same-type actions within COALESCE_MS merge */
+function pushHistory(state: PlannerState, type: string) {
+  const now = Date.now()
+  const coalesce = lastPush.type === type && now - lastPush.t < COALESCE_MS
+  lastPush = { type, t: now }
+  if (coalesce && past.length > 0) return
+  past.push(snapshotOf(state))
+  if (past.length > HISTORY_LIMIT) past.shift()
+  future.length = 0
+}
+
+function syncDepth(set: (p: Partial<PlannerState>) => void) {
+  set({ undoDepth: past.length, redoDepth: future.length })
+}
+
+// ─── Store ─────────────────────────────────────────────────────────────────
 
 export const usePlanner = create<PlannerState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       room: { w: TEMPLATES.cafe.roomW, d: TEMPLATES.cafe.roomD },
       items: TEMPLATES.cafe.items.map((t) => ({ uid: makeUid(), id: t.id, x: t.x, z: t.z, rot: t.rot ?? 0 })),
       brandColor: TEMPLATES.cafe.brandColor,
@@ -68,8 +123,11 @@ export const usePlanner = create<PlannerState>()(
       planOpen: true,
       projectName: TEMPLATES.cafe.projectName,
       templateId: 'cafe',
+      undoDepth: 0,
+      redoDepth: 0,
 
-      setRoom: (w, d) =>
+      setRoom: (w, d) => {
+        pushHistory(get(), 'room')
         set((s) => {
           const room = { w, d }
           const items = s.items.map((it) => {
@@ -77,17 +135,23 @@ export const usePlanner = create<PlannerState>()(
             return { ...it, ...p }
           })
           return { room, items, templateId: 'custom' }
-        }),
+        })
+        syncDepth(set)
+      },
 
-      addItem: (catalogId, x, z) =>
+      addItem: (catalogId, x, z) => {
+        pushHistory(get(), 'add')
         set((s) => {
           if (!getItem(catalogId)) return s
           const p = clampToRoom(snap(x), snap(z), catalogId, 0, s.room)
           const item: PlacedItem = { uid: makeUid(), id: catalogId, x: p.x, z: p.z, rot: 0 }
           return { items: [...s.items, item], selectedUid: item.uid }
-        }),
+        })
+        syncDepth(set)
+      },
 
-      moveItem: (uid, x, z) =>
+      moveItem: (uid, x, z) => {
+        pushHistory(get(), 'move')
         set((s) => {
           const it = s.items.find((i) => i.uid === uid)
           if (!it) return s
@@ -96,9 +160,12 @@ export const usePlanner = create<PlannerState>()(
             items: s.items.map((i) => (i.uid === uid ? { ...i, x: p.x, z: p.z } : i)),
             templateId: 'custom',
           }
-        }),
+        })
+        syncDepth(set)
+      },
 
-      rotateItem: (uid) =>
+      rotateItem: (uid) => {
+        pushHistory(get(), 'rotate')
         set((s) => {
           const it = s.items.find((i) => i.uid === uid)
           if (!it) return s
@@ -108,15 +175,21 @@ export const usePlanner = create<PlannerState>()(
             items: s.items.map((i) => (i.uid === uid ? { ...i, rot, ...p } : i)),
             templateId: 'custom',
           }
-        }),
+        })
+        syncDepth(set)
+      },
 
-      removeItem: (uid) =>
+      removeItem: (uid) => {
+        pushHistory(get(), 'remove')
         set((s) => ({
           items: s.items.filter((i) => i.uid !== uid),
           selectedUid: s.selectedUid === uid ? null : s.selectedUid,
-        })),
+        }))
+        syncDepth(set)
+      },
 
-      duplicateItem: (uid) =>
+      duplicateItem: (uid) => {
+        pushHistory(get(), 'duplicate')
         set((s) => {
           const it = s.items.find((i) => i.uid === uid)
           if (!it) return s
@@ -127,7 +200,9 @@ export const usePlanner = create<PlannerState>()(
             z: snap(it.z + 0.4),
           }
           return { items: [...s.items, copy], selectedUid: copy.uid }
-        }),
+        })
+        syncDepth(set)
+      },
 
       select: (uid) => set({ selectedUid: uid, armedId: null }),
       arm: (catalogId) =>
@@ -140,10 +215,15 @@ export const usePlanner = create<PlannerState>()(
       toggleFire: () => set((s) => ({ showFire: !s.showFire })),
       setCostOpen: (open) => set({ costOpen: open }),
       setPlanOpen: (open) => set({ planOpen: open }),
-      setBrandColor: (color) => set({ brandColor: color }),
+      setBrandColor: (color) => {
+        pushHistory(get(), 'brand')
+        set({ brandColor: color })
+        syncDepth(set)
+      },
       setProjectName: (name) => set({ projectName: name }),
 
-      loadTemplate: (id) =>
+      loadTemplate: (id) => {
+        pushHistory(get(), 'template')
         set(() => {
           const t = TEMPLATES[id]
           return {
@@ -155,9 +235,65 @@ export const usePlanner = create<PlannerState>()(
             selectedUid: null,
             armedId: null,
           }
-        }),
+        })
+        syncDepth(set)
+      },
 
-      clearAll: () => set({ items: [], selectedUid: null, armedId: null, templateId: 'custom' }),
+      clearAll: () => {
+        pushHistory(get(), 'clear')
+        set({ items: [], selectedUid: null, armedId: null, templateId: 'custom' })
+        syncDepth(set)
+      },
+
+      applySnapshot: (snap) => {
+        pushHistory(get(), 'snapshot')
+        set(() => ({
+          room: { ...snap.room },
+          items: snap.items.map((i) => ({ ...i, uid: i.uid || makeUid() })),
+          brandColor: snap.brandColor,
+          projectName: snap.projectName,
+          templateId: snap.templateId,
+          selectedUid: null,
+          armedId: null,
+        }))
+        syncDepth(set)
+      },
+
+      getSnapshot: () => snapshotOf(get()),
+
+      undo: () => {
+        const prev = past.pop()
+        if (!prev) return
+        future.push(snapshotOf(get()))
+        lastPush = { type: '', t: 0 }
+        set(() => ({
+          room: { ...prev.room },
+          items: prev.items.map((i) => ({ ...i })),
+          brandColor: prev.brandColor,
+          projectName: prev.projectName,
+          templateId: prev.templateId,
+          selectedUid: null,
+          armedId: null,
+        }))
+        syncDepth(set)
+      },
+
+      redo: () => {
+        const next = future.pop()
+        if (!next) return
+        past.push(snapshotOf(get()))
+        lastPush = { type: '', t: 0 }
+        set(() => ({
+          room: { ...next.room },
+          items: next.items.map((i) => ({ ...i })),
+          brandColor: next.brandColor,
+          projectName: next.projectName,
+          templateId: next.templateId,
+          selectedUid: null,
+          armedId: null,
+        }))
+        syncDepth(set)
+      },
     }),
     {
       name: 'forma-planner-v1',

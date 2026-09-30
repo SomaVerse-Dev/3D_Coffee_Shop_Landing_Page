@@ -94,3 +94,29 @@ Work Log:
 Stage Summary:
 - Project is feature-complete for v1 and visually polished. Handed off to 15-minute webDevReview cron for continuous QA/iteration.
 - Next-step ideas for future rounds: undo/redo, save named layouts to Prisma, multi-floor, item context menu, shareable layout URLs, dark mode.
+
+---
+Task ID: 5
+Agent: Z.ai Code (cron webDevReview)
+Task: Round 1 — QA sweep + Undo/Redo + Saved Layouts (Prisma/API) + Share links + toolbar fit polish
+
+Work Log:
+- Status assessment: v1 stable (lint 0 errors, GET / 200, console clean, agent-browser desktop+mobile sweep showed no bugs). Phase = stable → new-feature round per mandate.
+- Undo/Redo:
+  - store.ts: module-level history (past/future, limit 60) with same-action coalescing (900 ms) so drags/slider sweeps collapse into one undo step; undoDepth/redoDepth mirrored into store for reactive buttons; actions applySnapshot/getSnapshot/undo/redo added; every mutating action pushes history.
+  - Keyboard: Ctrl/Cmd+Z, Ctrl+Shift+Z, Ctrl+Y (guarded against inputs); Toolbar got a joined undo/redo icon pair with tooltips + disabled states.
+- Saved layouts (backend):
+  - prisma/schema.prisma: SavedLayout model (name, data JSON, thumb PNG data-URL, brandColor, timestamps) → bun run db:push OK.
+  - API (route handlers, zod-validated): GET/POST /api/layouts, GET/DELETE /api/layouts/[id]. List returns {id,name,brandColor,thumb,updatedAt,itemCount}.
+  - thumbnail.ts: canvas-drawn 2D plan preview (grid, rounded rect/circle glyphs in brand color, walls) → PNG data-URL for thumbnails.
+  - LayoutsMenu.tsx popover: inline save form (name defaults to project name, Enter submits), saved list with thumbnails + relative dates (date-fns), row click loads, two-step delete confirm (2.6 s window), loading skeletons, dashed empty state, count badge on trigger.
+- Share links:
+  - share.ts: URL-safe base64 codec (TextEncoder/Decoder, +/→-_) + buildShareUrl; Toolbar share button copies link (clipboard w/ toast fallback showing URL); PlannerWorkspace effect parses ?plan= on mount → applySnapshot + toast + history.replaceState cleanup; invalid code → destructive toast.
+- Toolbar fit polish (styling mandate): measured children (1399 px needed vs 1230 available) → template select 150 px, view-toggle labels / fire-safety text / brand name now hidden below 2xl (all return at ≥1536 px), gap 2. Toolbar now one row (59 px) at 1440 and wraps gracefully below; mobile 390 px has zero horizontal overflow.
+- E2E verified via agent-browser: save "QA Test Café" (toast + thumbnail row + badge 1), template switch → load saved (back to 32 items/15 seats), 2-step delete (confirm state ON → DELETE OK, API list []), place chair → Undo button enable → 16→15→16 via buttons AND Ctrl+Z/Ctrl+Y, share copy ("Share link copied"), opening captured ?plan=… URL restores exact layout (32 items/15 seats).
+
+Stage Summary:
+- New capabilities: full undo/redo, persistent saved-layouts library (SQLite via Prisma + REST API), one-click shareable layout URLs, thumbnails generated client-side.
+- Files: prisma/schema.prisma; src/app/api/layouts/{route.ts,[id]/route.ts}; src/lib/planner/{store.ts,share.ts,thumbnail.ts}; src/components/planner/{Toolbar.tsx,LayoutsMenu.tsx,PlannerWorkspace.tsx}.
+- Lint 0 errors; dev.log clean; desktop 1440 + mobile 390 QA passed; leftover test row deleted (DB back to empty).
+- Next-round ideas (priority): light/dark theme toggle; item context menu (right-click rotate/duplicate/delete); layout diff history panel; per-item price override; multi-room/zone support; SoundCloud-style public gallery of shared layouts (server-rendered page with OG image).

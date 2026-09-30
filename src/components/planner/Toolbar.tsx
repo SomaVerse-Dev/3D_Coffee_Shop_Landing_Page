@@ -1,6 +1,6 @@
 'use client'
 
-import { Box, Calculator, DoorOpen, FileDown, LayoutTemplate, Map, Ruler, SwatchBook } from 'lucide-react'
+import { Box, Calculator, DoorOpen, FileDown, LayoutTemplate, Link2, Map, Redo2, Ruler, SwatchBook, Undo2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -10,11 +10,14 @@ import { Separator } from '@/components/ui/separator'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { useToast } from '@/hooks/use-toast'
 import { usePlanner } from '@/lib/planner/store'
 import { TEMPLATES, TEMPLATE_ORDER } from '@/lib/planner/templates'
 import { computeCost } from '@/lib/planner/capacity'
 import { BRAND_PRESETS, computedBrandName } from '@/lib/planner/brandNames'
+import { buildShareUrl } from '@/lib/planner/share'
 import { cn } from '@/lib/utils'
+import LayoutsMenu from './LayoutsMenu'
 
 function compactMoney(n: number): string {
   if (n >= 1000) return `$${(Math.round(n / 100) / 10).toFixed(1)}k`
@@ -34,12 +37,26 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
   const setBrandColor = usePlanner((s) => s.setBrandColor)
   const items = usePlanner((s) => s.items)
   const setCostOpen = usePlanner((s) => s.setCostOpen)
+  const undoDepth = usePlanner((s) => s.undoDepth)
+  const redoDepth = usePlanner((s) => s.redoDepth)
+  const undo = usePlanner((s) => s.undo)
+  const redo = usePlanner((s) => s.redo)
+  const getSnapshot = usePlanner((s) => s.getSnapshot)
+  const { toast } = useToast()
 
   const cost = computeCost(items)
 
+  function handleShare() {
+    const url = buildShareUrl(getSnapshot())
+    void navigator.clipboard
+      .writeText(url)
+      .then(() => toast({ title: 'Share link copied', description: 'Anyone with the link sees this exact layout.' }))
+      .catch(() => toast({ title: url, description: 'Copy this link to share the layout.' }))
+  }
+
   return (
     <TooltipProvider delayDuration={250}>
-      <div className="flex flex-wrap items-center gap-2 border-b border-stone-200/80 bg-warmwhite/70 px-3 py-2.5 shadow-[inset_0_-1px_0_0_rgba(226,218,202,0.6)] sm:gap-2.5 sm:px-4">
+      <div className="flex flex-wrap items-center gap-2 border-b border-stone-200/80 bg-warmwhite/70 px-3 py-2.5 shadow-[inset_0_-1px_0_0_rgba(226,218,202,0.6)] sm:gap-2 sm:px-4">
         {/* brand */}
         <div className="mr-1 flex items-center gap-2.5 pl-0.5">
           <span
@@ -59,7 +76,7 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
         <Select value={templateId === 'custom' ? 'custom' : templateId}
           onValueChange={(v) => { if (v !== 'custom') loadTemplate(v as 'cafe') }}>
           <SelectTrigger
-            className="h-9 w-[186px] bg-white text-xs font-medium shadow-xs transition-colors hover:border-stone-400/70 data-[size=default]:h-9"
+            className="h-9 w-[150px] bg-white text-xs font-medium shadow-xs transition-colors hover:border-stone-400/70 data-[size=default]:h-9"
             aria-label="Load template"
           >
             <LayoutTemplate className="h-3.5 w-3.5 text-stone-400" />
@@ -137,7 +154,7 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
                   )}
                 >
                   <Icon className="h-3.5 w-3.5" />
-                  {label}
+                  <span className="hidden 2xl:inline">{label}</span>
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs">
@@ -150,7 +167,7 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
         {/* fire safety */}
         <label className="flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-stone-300/80 bg-white px-3 shadow-xs transition-colors hover:border-stone-400/70">
           <DoorOpen className={cn('h-4 w-4 transition-colors', showFire ? 'text-emerald-600' : 'text-stone-400')} />
-          <span className="text-xs font-medium text-stone-600">Fire safety</span>
+          <span className="hidden text-xs font-medium text-stone-600 2xl:inline">Fire safety</span>
           <Switch checked={showFire} onCheckedChange={toggleFire} aria-label="Show fire safety egress" />
         </label>
 
@@ -163,7 +180,7 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
               title="Brand color"
             >
               <SwatchBook className="mr-1.5 h-3.5 w-3.5 text-stone-400" />
-              <span className="hidden sm:inline">{computedBrandName(brandColor)}</span>
+              <span className="hidden 2xl:inline">{computedBrandName(brandColor)}</span>
               <span className="h-4 w-4 rounded-full border border-stone-300" style={{ backgroundColor: brandColor }} />
             </Button>
           </PopoverTrigger>
@@ -206,6 +223,62 @@ export default function Toolbar({ onExport, onOpenCatalog }: { onExport: () => v
             </div>
           </PopoverContent>
         </Popover>
+
+        {/* history: undo / redo */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={undo}
+              disabled={undoDepth === 0}
+              aria-label="Undo"
+              title="Undo (Ctrl+Z)"
+              className="h-9 w-9 rounded-l-lg rounded-r-none border-r-0 bg-white shadow-xs disabled:opacity-40"
+            >
+              <Undo2 className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">Undo (Ctrl+Z)</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={redo}
+              disabled={redoDepth === 0}
+              aria-label="Redo"
+              title="Redo (Ctrl+Shift+Z)"
+              className="-ml-2 h-9 w-9 rounded-l-none rounded-r-lg bg-white shadow-xs disabled:opacity-40"
+            >
+              <Redo2 className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">Redo (Ctrl+Shift+Z)</TooltipContent>
+        </Tooltip>
+
+        {/* saved layouts */}
+        <LayoutsMenu />
+
+        {/* share link */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={handleShare}
+              aria-label="Copy share link"
+              title="Copy share link"
+              className="h-9 w-9 bg-white shadow-xs"
+            >
+              <Link2 className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">Copy a link that opens this exact layout</TooltipContent>
+        </Tooltip>
+
+        <Separator orientation="vertical" className="hidden h-8 sm:block" />
 
         <div className="ml-auto flex items-center gap-2">
           <Button

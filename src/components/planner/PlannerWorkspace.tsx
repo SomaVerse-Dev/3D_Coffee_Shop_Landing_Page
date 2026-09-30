@@ -11,7 +11,9 @@ import { CapacityMeter } from './CapacityMeter'
 import { HintChip, PlanMinimap, SelectionControls } from './ViewportHud'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useToast } from '@/hooks/use-toast'
 import { usePlanner } from '@/lib/planner/store'
+import { decodeLayout } from '@/lib/planner/share'
 import { TEMPLATES, TEMPLATE_ORDER } from '@/lib/planner/templates'
 
 const emptySubscribe = () => () => {}
@@ -33,10 +35,28 @@ export default function PlannerWorkspace() {
   const selectedUid = usePlanner((s) => s.selectedUid)
   const rotateItem = usePlanner((s) => s.rotateItem)
   const removeItem = usePlanner((s) => s.removeItem)
+  const undo = usePlanner((s) => s.undo)
+  const redo = usePlanner((s) => s.redo)
+  const applySnapshot = usePlanner((s) => s.applySnapshot)
+  const { toast } = useToast()
 
   // rehydrate persisted state after mount (skipHydration is set in the store)
   useEffect(() => {
     void usePlanner.persist.rehydrate()
+  }, [])
+
+  // open a shared layout from ?plan=<code>
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get('plan')
+    if (!code) return
+    const snap = decodeLayout(code)
+    if (snap) {
+      applySnapshot(snap)
+      toast({ title: 'Shared layout opened', description: `“${snap.projectName}” — ${snap.items.length} items.` })
+    } else {
+      toast({ title: 'That share link looks broken', variant: 'destructive' })
+    }
+    window.history.replaceState(null, '', window.location.pathname)
   }, [])
 
   // keyboard shortcuts
@@ -44,18 +64,30 @@ export default function PlannerWorkspace() {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
+      const mod = e.metaKey || e.ctrlKey
+      if (mod && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault()
+        if (e.shiftKey) redo()
+        else undo()
+        return
+      }
+      if (mod && (e.key === 'y' || e.key === 'Y')) {
+        e.preventDefault()
+        redo()
+        return
+      }
       if (e.key === 'Escape') {
         arm(null)
         select(null)
-      } else if ((e.key === 'r' || e.key === 'R') && selectedUid) {
+      } else if ((e.key === 'r' || e.key === 'R') && !mod && selectedUid) {
         rotateItem(selectedUid)
-      } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedUid) {
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && !mod && selectedUid) {
         removeItem(selectedUid)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedUid, rotateItem, removeItem, arm, select])
+  }, [selectedUid, rotateItem, removeItem, arm, select, undo, redo])
 
   return (
     <div className="overflow-hidden rounded-2xl border border-stone-300/60 bg-card shadow-[0_24px_60px_-24px_rgba(46,43,38,0.35)]">

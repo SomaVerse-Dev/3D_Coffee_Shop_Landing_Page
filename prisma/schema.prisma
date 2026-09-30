@@ -30,3 +30,18 @@ model Post {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+/// A named, savable floor-plan snapshot (items + room + branding).
+model SavedLayout {
+  id         String   @id @default(cuid())
+  name       String
+  /// JSON blob: { room, items, brandColor, projectName, templateId }
+  data       String
+  /// Small PNG data-URL preview of the plan (optional)
+  thumb      String?
+  brandColor String   @default("#C05B2E")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([updatedAt])
+}
