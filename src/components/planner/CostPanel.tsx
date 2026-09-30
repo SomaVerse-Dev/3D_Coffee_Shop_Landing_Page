@@ -1,8 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
-  Calculator, Download, Info, Landmark, PenLine, Target, TriangleAlert, Wallet,
+  Calculator, Download, ImageDown, Info, Landmark, PenLine, Target, TriangleAlert, Wallet,
 } from 'lucide-react'
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
@@ -12,9 +12,12 @@ import { Separator } from '@/components/ui/separator'
 import { usePlanner } from '@/lib/planner/store'
 import { getItem } from '@/lib/planner/catalog'
 import {
-  budgetStatusOf, computeCategoryBreakdown, computeCost, fmtMoney, VENUES,
+  budgetStatusOf, computeCategoryBreakdown, computeCapacity, computeCost, fmtMoney, VENUES, EXIT_CAPACITY,
 } from '@/lib/planner/capacity'
 import { TEMPLATES } from '@/lib/planner/templates'
+import { InsightsCard, ReadinessCard } from './InsightsCards'
+import PlanSVG from './PlanSVG'
+import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 
 const BUDGET_PRESETS = [15_000, 25_000, 40_000, 60_000]
@@ -71,15 +74,70 @@ export default function CostPanel() {
   const items = usePlanner((s) => s.items)
   const room = usePlanner((s) => s.room)
   const brand = usePlanner((s) => s.brandColor)
+  const showFire = usePlanner((s) => s.showFire)
   const templateId = usePlanner((s) => s.templateId)
   const projectName = usePlanner((s) => s.projectName)
   const budget = usePlanner((s) => s.budget)
   const setBudget = usePlanner((s) => s.setBudget)
+  const { toast } = useToast()
 
   const [budgetDraft, setBudgetDraft] = useState('')
+  const [pngBusy, setPngBusy] = useState(false)
   const cost = computeCost(items)
   const hasCustom = cost.lines.some((l) => (l as { custom?: boolean }).custom)
   const slices = useMemo(() => computeCategoryBreakdown(items), [items])
+  const pngSvgRef = useRef<SVGSVGElement | null>(null)
+
+  /** Render the hidden plan SVG into a 2× canvas and download it as a PNG sheet. */
+  async function downloadPlanPng() {
+    if (!pngSvgRef.current || pngBusy) return
+    setPngBusy(true)
+    try {
+      const svg = pngSvgRef.current
+      const xml = new XMLSerializer().serializeToString(svg)
+      const img = new Image()
+      const svgUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml)
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve()
+        img.onerror = () => reject(new Error('SVG render failed'))
+        img.src = svgUrl
+      })
+      const scale = 2
+      const W = img.width * scale
+      const H = img.height * scale + 96
+      const canvas = document.createElement('canvas')
+      canvas.width = W
+      canvas.height = H
+      const ctx = canvas.getContext('2d')!
+      ctx.fillStyle = '#FDFAF3'
+      ctx.fillRect(0, 0, W, H)
+      // header strip
+      ctx.fillStyle = brand
+      ctx.fillRect(28, 24, 22, 22)
+      ctx.fillStyle = '#2E2B26'
+      ctx.font = '700 26px system-ui, sans-serif'
+      ctx.fillText('FORMA', 62, 43)
+      ctx.font = '500 13px system-ui, sans-serif'
+      ctx.fillStyle = '#8A8375'
+      ctx.textAlign = 'right'
+      ctx.fillText(`${projectName || 'Untitled project'} · ${(room.w * room.d).toFixed(0)} m² · ${seatCount} seats · ${fmtMoney(cost.total)}`, W - 28, 42)
+      ctx.textAlign = 'left'
+      ctx.drawImage(img, 0, 72, img.width * scale, img.height * scale)
+
+      const slug = (projectName || 'layout').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'layout'
+      const a = document.createElement('a')
+      a.href = canvas.toDataURL('image/png')
+      a.download = `forma-plan-${slug}.png`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      toast({ title: 'Plan image saved', description: 'A high-resolution PNG of your floor plan was downloaded.' })
+    } catch {
+      toast({ title: 'Export failed', description: 'Could not render the plan image. Please try again.', variant: 'destructive' })
+    } finally {
+      setPngBusy(false)
+    }
+  }
 
   // seat count via catalog
   const seatCount = useMemo(() => {
@@ -90,6 +148,9 @@ export default function CostPanel() {
     }
     return n
   }, [items])
+
+  const venue: 'cafe' | 'coworking' | 'boutique' | 'restaurant' = templateId === 'custom' ? 'cafe' : templateId
+  const cap = useMemo(() => computeCapacity(items, room, venue), [items, room, venue])
 
   const budgetState = budget !== null ? budgetStatusOf(cost.total, budget) : null
   const overBudget = budgetState?.status === 'over'
@@ -206,6 +267,16 @@ export default function CostPanel() {
               )}
             </section>
 
+            {/* ── readiness checks (compliance) ────────────────────── */}
+            <div className="mt-4">
+              <ReadinessCard />
+            </div>
+
+            {/* ── layout insights ──────────────────────────────────── */}
+            <div className="mt-4">
+              <InsightsCard />
+            </div>
+
             {/* ── category breakdown ───────────────────────────────── */}
             {slices.length > 0 && (
               <section aria-label="Spend by category" className="mt-4">
@@ -311,10 +382,12 @@ export default function CostPanel() {
               <Download className="h-3.5 w-3.5" />
               BOM · CSV
             </Button2>
+            <Button2 onClick={downloadPlanPng} disabled={pngBusy || items.length === 0}>
+              <ImageDown className="h-3.5 w-3.5" />
+              {pngBusy ? 'Rendering…' : 'Plan · PNG'}
+            </Button2>
             <p className="flex-1 text-[10px] leading-snug text-stone-400">
-              {VENUES[templateId as 'cafe']
-                ? <>Venue assumption: {VENUES[templateId as 'cafe'].label.toLowerCase()} · {seatCount} {seatCount === 1 ? 'seat' : 'seats'}</>
-                : <>{seatCount} {seatCount === 1 ? 'seat' : 'seats'} · {cost.lines.length} {cost.lines.length === 1 ? 'line' : 'lines'}</>}
+              Venue: {VENUES[venue].label.toLowerCase()} · {seatCount} {seatCount === 1 ? 'seat' : 'seats'} · load {cap.occupantLoad}/{EXIT_CAPACITY}
             </p>
           </div>
           <p className="mt-3 flex items-start gap-1.5 text-[10.5px] leading-relaxed text-stone-400">
@@ -323,6 +396,18 @@ export default function CostPanel() {
           </p>
         </div>
       </SheetContent>
+
+      {/* hidden full-fidelity plan for PNG rendering (offscreen) */}
+      <div className="pointer-events-none fixed -left-[9999px] top-0" aria-hidden>
+        <PlanSVG
+          refCb={(el) => { pngSvgRef.current = el }}
+          room={room}
+          items={items}
+          brand={brand}
+          showFire={showFire}
+          detailed
+        />
+      </div>
     </Sheet>
   )
 }

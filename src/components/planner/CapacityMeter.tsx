@@ -1,9 +1,10 @@
 'use client'
 
 import { motion, AnimatePresence } from 'framer-motion'
-import { Users, Ruler, DoorOpen } from 'lucide-react'
+import { Users, Ruler, DoorOpen, TriangleAlert } from 'lucide-react'
 import { usePlanner } from '@/lib/planner/store'
 import { computeCapacity, VENUES, STATUS_META, type CapacityStatus } from '@/lib/planner/capacity'
+import { dischargeBlockages } from '@/lib/planner/egress'
 import { cn } from '@/lib/utils'
 
 function StatusPill({ status }: { status: CapacityStatus }) {
@@ -25,8 +26,10 @@ export function CapacityMeter() {
   const items = usePlanner((s) => s.items)
   const room = usePlanner((s) => s.room)
   const templateId = usePlanner((s) => s.templateId)
+  const setCostOpen = usePlanner((s) => s.setCostOpen)
   const venue = templateId === 'custom' ? 'cafe' : templateId
   const cap = computeCapacity(items, room, venue)
+  const blocked = dischargeBlockages(items, room)
   const meta = VENUES[venue]
   const pct = cap.maxSeats ? Math.min(100, Math.round((cap.seats / cap.maxSeats) * 100)) : 0
   const barColor = cap.overall === 'over' ? 'bg-red-500' : cap.overall === 'tight' ? 'bg-amber-500' : 'bg-emerald-500'
@@ -78,6 +81,24 @@ export function CapacityMeter() {
           Retail layout — occupancy driven by {meta.factor} m²/person
         </div>
       )}
+
+      <AnimatePresence initial={false}>
+        {blocked.length > 0 && (
+          <motion.button
+            key="exit-blocked"
+            initial={{ opacity: 0, y: -6, height: 0 }}
+            animate={{ opacity: 1, y: 0, height: 'auto' }}
+            exit={{ opacity: 0, y: -6, height: 0 }}
+            transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+            onClick={() => setCostOpen(true)}
+            title="Open the cost panel for details"
+            className="mt-2 flex w-full items-center gap-1.5 overflow-hidden rounded-lg border border-red-300/80 bg-red-100/90 px-2 py-1 text-left text-[10.5px] font-semibold text-red-800 shadow-xs backdrop-blur-sm transition-colors hover:bg-red-100"
+          >
+            <TriangleAlert className="h-3 w-3 shrink-0 text-red-600" aria-hidden />
+            Exit access blocked — {blocked.length} {blocked.length === 1 ? 'item' : 'items'} in the landing
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       <div className="mt-2.5 flex items-center gap-3 border-t border-stone-200/80 pt-2.5 text-[10.5px] font-medium tabular-nums text-stone-500">
         <span className="inline-flex items-center gap-1"><Ruler className="h-3 w-3 text-stone-400" />{cap.area.toFixed(0)} m²</span>

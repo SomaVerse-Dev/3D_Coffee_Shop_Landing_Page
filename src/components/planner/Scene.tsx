@@ -8,6 +8,7 @@ import { useTheme } from 'next-themes'
 import { damp, damp3 } from 'maath/easing'
 import { usePlanner, clampToRoom } from '@/lib/planner/store'
 import { getItem, halfExtents } from '@/lib/planner/catalog'
+import { egressRoutes } from '@/lib/planner/egress'
 import { ItemModel } from './furniture'
 
 const WALL_H = 2.5
@@ -280,14 +281,8 @@ function Chevron() {
 function EgressPaths({ w, d }: { w: number; d: number }) {
   const { curves, counts, total } = useMemo(() => {
     const v = (x: number, z: number) => new THREE.Vector3(x, 0.035, z)
-    const S = v(0, d / 2 - 0.32)
-    const N = v(w / 4, -d / 2 + 0.4)
     const mk = (pts: THREE.Vector3[]) => new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4)
-    const cs = [
-      mk([v(-w / 4, -d / 4), v(-w / 4.6, d / 8), v(-w / 16, d / 3), S]),
-      mk([v(w / 5, d / 10), v(w / 8, d / 3), v(w / 28, d / 2 - 0.9), S]),
-      mk([v(w / 2.6, d / 4), v(w / 2.15, -d / 10), N]),
-    ]
+    const cs = egressRoutes({ w, d }).map((r) => mk(r.map((p) => v(p.x, p.z))))
     const countsArr = cs.map((c) => Math.max(7, Math.floor(c.getLength() / 0.62)))
     return { curves: cs, counts: countsArr, total: countsArr.reduce((a, b) => a + b, 0) }
   }, [w, d])

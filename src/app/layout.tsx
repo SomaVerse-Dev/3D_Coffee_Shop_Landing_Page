@@ -20,6 +20,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("http://localhost:3000"),
   title: "FORMA — 3D Commercial Space Planner",
   description:
     "Plan cafés, small offices and boutique retail in 3D. Templates, live capacity & fire-egress checks, brand-color theming and cost estimates.",
@@ -29,9 +30,26 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: "FORMA — 3D Commercial Space Planner",
-    description: "Plan your café, studio or boutique in 3D — capacity, egress and costs included.",
+    description:
+      "Lay out your café, studio or boutique in 3D. Seats, fire egress and a fit-out budget update as you go — export a print-ready sheet in one click.",
     siteName: "FORMA",
     type: "website",
+    locale: "en_US",
+    images: [
+      {
+        url: "/gallery/cafe.png",
+        width: 1024,
+        height: 1024,
+        alt: "FORMA planner — documentary-style café interior used as a starting template",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "FORMA — 3D Commercial Space Planner",
+    description:
+      "Drag counters, click in chairs, swing between plan and 3D. Capacity, egress and costs update live.",
+    images: ["/gallery/cafe.png"],
   },
 };
 

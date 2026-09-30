@@ -170,3 +170,52 @@ export const STATUS_META: Record<CapacityStatus, { label: string; className: str
   tight: { label: 'Getting tight', className: 'bg-amber-100 text-amber-800 border-amber-200', dot: 'bg-amber-500' },
   over: { label: 'Over capacity', className: 'bg-red-100 text-red-700 border-red-200', dot: 'bg-red-500' },
 }
+
+// ─── Layout insights (footprint occupancy, efficiency ratios) ──────────────
+
+export interface SeatMixRow {
+  id: string
+  name: string
+  seats: number
+}
+
+export interface InsightsReport {
+  /** sum of item footprint areas in m² (AABB approx) */
+  footprintM2: number
+  /** footprintM2 / room area, 0..1+ */
+  occupancy: number
+  /** cost per seat, null when no seats */
+  costPerSeat: number | null
+  /** total fit-out cost per m² of floor */
+  costPerM2: number
+  /** top seat contributors, biggest first (max 4) */
+  seatMix: SeatMixRow[]
+}
+
+export function computeInsights(items: PlacedItem[], room: RoomSpec): InsightsReport {
+  const area = room.w * room.d
+  let footprintM2 = 0
+  let seats = 0
+  const mix = new Map<string, SeatMixRow>()
+  for (const it of items) {
+    const cat = getItem(it.id)
+    if (!cat) continue
+    const c = Math.abs(Math.cos(it.rot))
+    const s = Math.abs(Math.sin(it.rot))
+    footprintM2 += (cat.w * c + cat.d * s) * (cat.w * s + cat.d * c)
+    seats += cat.seats
+    if (cat.seats > 0) {
+      const row = mix.get(cat.id) ?? { id: cat.id, name: cat.name, seats: 0 }
+      row.seats += cat.seats
+      mix.set(cat.id, row)
+    }
+  }
+  const total = computeCost(items).total
+  return {
+    footprintM2,
+    occupancy: area > 0 ? footprintM2 / area : 0,
+    costPerSeat: seats > 0 ? total / seats : null,
+    costPerM2: area > 0 ? total / area : 0,
+    seatMix: [...mix.values()].sort((a, b) => b.seats - a.seats).slice(0, 4),
+  }
+}
