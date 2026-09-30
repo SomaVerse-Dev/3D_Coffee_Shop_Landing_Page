@@ -30,6 +30,8 @@ export interface PlacedItem {
   z: number
   /** rotation in radians, CCW around Y (0 = faces +z / south) */
   rot: number
+  /** optional per-item price override (USD); undefined = catalog list price */
+  price?: number
 }
 
 export interface RoomSpec {

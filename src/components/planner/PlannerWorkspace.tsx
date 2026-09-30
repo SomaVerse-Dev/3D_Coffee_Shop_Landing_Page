@@ -7,6 +7,8 @@ import Toolbar from './Toolbar'
 import CatalogSidebar from './CatalogSidebar'
 import CostPanel from './CostPanel'
 import ExportModal from './ExportModal'
+import ItemContextMenu from './ItemContextMenu'
+import ViewControls from './ViewControls'
 import { CapacityMeter } from './CapacityMeter'
 import { HintChip, PlanMinimap, SelectionControls } from './ViewportHud'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
@@ -38,11 +40,17 @@ export default function PlannerWorkspace() {
   const undo = usePlanner((s) => s.undo)
   const redo = usePlanner((s) => s.redo)
   const applySnapshot = usePlanner((s) => s.applySnapshot)
+  const duplicateItem = usePlanner((s) => s.duplicateItem)
+  const requestZoom = usePlanner((s) => s.requestZoom)
   const { toast } = useToast()
 
   // rehydrate persisted state after mount (skipHydration is set in the store)
   useEffect(() => {
     void usePlanner.persist.rehydrate()
+    // dev-only QA handle for browser automation
+    if (process.env.NODE_ENV !== 'production') {
+      ;(window as unknown as { __forma?: typeof usePlanner }).__forma = usePlanner
+    }
   }, [])
 
   // open a shared layout from ?plan=<code>
@@ -81,13 +89,22 @@ export default function PlannerWorkspace() {
         select(null)
       } else if ((e.key === 'r' || e.key === 'R') && !mod && selectedUid) {
         rotateItem(selectedUid)
+      } else if ((e.key === 'd' || e.key === 'D') && !mod && selectedUid) {
+        e.preventDefault()
+        duplicateItem(selectedUid)
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && !mod && selectedUid) {
         removeItem(selectedUid)
+      } else if ((e.key === 'f' || e.key === 'F') && !mod) {
+        requestZoom('fit')
+      } else if ((e.key === '+' || e.key === '=') && !mod) {
+        requestZoom('in')
+      } else if ((e.key === '-' || e.key === '_') && !mod) {
+        requestZoom('out')
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedUid, rotateItem, removeItem, arm, select, undo, redo])
+  }, [selectedUid, rotateItem, removeItem, duplicateItem, arm, select, undo, redo, requestZoom])
 
   return (
     <div className="overflow-hidden rounded-2xl border border-stone-300/60 bg-card shadow-[0_24px_60px_-24px_rgba(46,43,38,0.35)]">
@@ -112,6 +129,8 @@ export default function PlannerWorkspace() {
           ) : (
             <>
               <Scene />
+              <ViewControls />
+              <ItemContextMenu />
 
               {/* HUD */}
               <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-3">

@@ -4,6 +4,7 @@ import * as THREE from 'three'
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame, type ThreeEvent } from '@react-three/fiber'
 import { Grid, OrbitControls } from '@react-three/drei'
+import { useTheme } from 'next-themes'
 import { damp, damp3 } from 'maath/easing'
 import { usePlanner, clampToRoom } from '@/lib/planner/store'
 import { getItem, halfExtents } from '@/lib/planner/catalog'
@@ -11,9 +12,45 @@ import { ItemModel } from './furniture'
 
 const WALL_H = 2.5
 const WALL_T = 0.12
-const FLOOR_COLOR = '#F5F0E4'
-const APRON_COLOR = '#E9E1CF'
-const WALL_COLOR = '#EFE8D8'
+
+/* Day + night scene palettes — the 3D viewport re-lights when the theme flips */
+const DAY = {
+  bg: '#EDE7D9',
+  fog: '#EDE7D9',
+  floor: '#F5F0E4',
+  apron: '#E9E1CF',
+  wall: '#EFE8D8',
+  wallCap: '#3A372F',
+  gridCell: '#DCD2BA',
+  gridSection: '#C6B995',
+  windowGlass: '#D8E0D6',
+  windowFrame: '#A78861',
+  threshold: '#C9BC9C',
+  hemiSky: '#FFFFFF',
+  hemiGround: '#CBC2AC',
+  ambient: 0.55,
+  hemi: 0.55,
+  sun: 1.25,
+}
+
+const NIGHT = {
+  bg: '#191510',
+  fog: '#191510',
+  floor: '#2A251D',
+  apron: '#201C15',
+  wall: '#332D24',
+  wallCap: '#514939',
+  gridCell: '#3D362B',
+  gridSection: '#514839',
+  windowGlass: '#8FA08F',
+  windowFrame: '#8A724E',
+  threshold: '#57503F',
+  hemiSky: '#6B6355',
+  hemiGround: '#16120C',
+  ambient: 0.34,
+  hemi: 0.42,
+  sun: 0.85,
+}
 
 function floorPoint(e: ThreeEvent<PointerEvent | MouseEvent>): { x: number; z: number } {
   const t = -e.ray.origin.y / e.ray.direction.y
@@ -23,7 +60,7 @@ function floorPoint(e: ThreeEvent<PointerEvent | MouseEvent>): { x: number; z: n
   }
 }
 
-// ─── Camera rig: smooth swing between plan and 3D ──────────────────────────
+// ─── Camera rig: smooth swing between plan and 3D + zoom requests ─────────
 
 function CameraRig({
   roomW, roomD, viewMode, controlsRef, animatingRef,
@@ -34,6 +71,11 @@ function CameraRig({
   controlsRef: React.MutableRefObject<any>
   animatingRef: React.MutableRefObject<boolean>
 }) {
+  const zoomReq = usePlanner((s) => s.zoomReq)
+  const lastReq = useRef(0)
+  /** active dolly animation: camera position we are easing toward, or null */
+  const dollyTarget = useRef<THREE.Vector3 | null>(null)
+
   const target = useMemo(() => {
     return viewMode === 'plan'
       ? { pos: new THREE.Vector3(0.02, Math.max(roomW, roomD) * 1.3 + 3, 0.02), look: new THREE.Vector3(0, 0, 0) }
@@ -44,9 +86,43 @@ function CameraRig({
     animatingRef.current = true
   }, [target, animatingRef])
 
+  // react to zoom requests coming from the HUD buttons / keyboard
+  useEffect(() => {
+    if (zoomReq.n === lastReq.current) return
+    lastReq.current = zoomReq.n
+    const c = controlsRef.current
+    if (!c) return
+    if (zoomReq.kind === 'fit') {
+      // re-frame the room: replay the swing to the current view's home position
+      animatingRef.current = true
+      return
+    }
+    const cam = c.object as THREE.Camera
+    const dir = cam.position.clone().sub(c.target)
+    const len = dir.length()
+    const next = THREE.MathUtils.clamp(
+      zoomReq.kind === 'in' ? len * 0.72 : len * 1.42,
+      c.minDistance ?? 3.5,
+      c.maxDistance ?? 48,
+    )
+    if (Math.abs(next - len) < 0.05) return
+    dollyTarget.current = c.target.clone().add(dir.setLength(next))
+  }, [zoomReq, controlsRef])
+
   useFrame((state, dt) => {
     const c = controlsRef.current
     if (!c) return
+
+    // eased zoom-in/out along the view vector
+    if (dollyTarget.current) {
+      damp3(state.camera.position, dollyTarget.current, 0.16, dt)
+      if (state.camera.position.distanceTo(dollyTarget.current) < 0.04) {
+        state.camera.position.copy(dollyTarget.current)
+        dollyTarget.current = null
+      }
+      return
+    }
+
     if (animatingRef.current) {
       c.enabled = false
       // top-down needs a stable roll: screen-up = north (-z); 3D restores standard up
@@ -66,23 +142,25 @@ function CameraRig({
 
 // ─── Room shell: floor, grid, walls, windows, exits ────────────────────────
 
-function WallSegment({ x, z, len, alongX }: { x: number; z: number; len: number; alongX: boolean }) {
+type Palette = typeof DAY
+
+function WallSegment({ x, z, len, alongX, pal }: { x: number; z: number; len: number; alongX: boolean; pal: Palette }) {
   if (len <= 0.05) return null
   return (
     <group position={[x, 0, z]}>
       <mesh position={[0, WALL_H / 2, 0]} castShadow receiveShadow>
         <boxGeometry args={alongX ? [len, WALL_H, WALL_T] : [WALL_T, WALL_H, len]} />
-        <meshStandardMaterial color={WALL_COLOR} roughness={0.92} />
+        <meshStandardMaterial color={pal.wall} roughness={0.92} />
       </mesh>
       <mesh position={[0, WALL_H + 0.03, 0]}>
         <boxGeometry args={alongX ? [len, 0.06, WALL_T + 0.04] : [WALL_T + 0.04, 0.06, len]} />
-        <meshStandardMaterial color="#3A372F" roughness={0.8} />
+        <meshStandardMaterial color={pal.wallCap} roughness={0.8} />
       </mesh>
     </group>
   )
 }
 
-function Room({ w, d, showFire }: { w: number; d: number; showFire: boolean }) {
+function Room({ w, d, showFire, pal }: { w: number; d: number; showFire: boolean; pal: Palette }) {
   const segs = useMemo(() => {
     const S = [
       { x: (-w / 2 + -0.7) / 2, z: d / 2 + WALL_T / 2, len: -0.7 - -w / 2, alongX: true },
@@ -106,49 +184,49 @@ function Room({ w, d, showFire }: { w: number; d: number; showFire: boolean }) {
       {/* floor slab */}
       <mesh position={[0, -0.04, 0]} receiveShadow>
         <boxGeometry args={[w, 0.08, d]} />
-        <meshStandardMaterial color={FLOOR_COLOR} roughness={0.95} />
+        <meshStandardMaterial color={pal.floor} roughness={0.95} />
       </mesh>
       {/* blueprint grid */}
       <Grid
         position={[0, 0.006, 0]}
         cellSize={0.5}
         cellThickness={0.5}
-        cellColor="#DCD2BA"
+        cellColor={pal.gridCell}
         sectionSize={2}
         sectionThickness={0.9}
-        sectionColor="#C6B995"
+        sectionColor={pal.gridSection}
         fadeDistance={58}
         fadeStrength={1.1}
         infiniteGrid
       />
       {segs.map((s, i) => (
-        <WallSegment key={i} {...s} />
+        <WallSegment key={i} {...s} pal={pal} />
       ))}
       {/* interior windows on west wall */}
       {[-d / 4, d / 4].map((z) => (
         <group key={z} position={[-w / 2 + 0.04, 0, z]}>
           <mesh position={[0, 1.45, 0]}>
             <boxGeometry args={[0.03, 1.3, Math.min(1.6, d / 3)]} />
-            <meshStandardMaterial color="#D8E0D6" transparent opacity={0.4} roughness={0.15} metalness={0.1} />
+            <meshStandardMaterial color={pal.windowGlass} transparent opacity={0.4} roughness={0.15} metalness={0.1} />
           </mesh>
           <mesh position={[0, 1.45, 0]}>
             <boxGeometry args={[0.05, 1.38, 0.06]} />
-            <meshStandardMaterial color="#A78861" roughness={0.8} />
+            <meshStandardMaterial color={pal.windowFrame} roughness={0.8} />
           </mesh>
           <mesh position={[0, 0.78, 0]}>
             <boxGeometry args={[0.07, 0.08, Math.min(1.66, d / 3 + 0.06)]} />
-            <meshStandardMaterial color="#A78861" roughness={0.8} />
+            <meshStandardMaterial color={pal.windowFrame} roughness={0.8} />
           </mesh>
         </group>
       ))}
       {/* entrance threshold + rear exit threshold */}
       <mesh position={[0, 0.005, d / 2 - 0.02]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[doorH, 0.16]} />
-        <meshStandardMaterial color="#C9BC9C" roughness={1} />
+        <meshStandardMaterial color={pal.threshold} roughness={1} />
       </mesh>
       <mesh position={[w / 4, 0.005, -d / 2 + 0.02]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[rearW, 0.16]} />
-        <meshStandardMaterial color="#C9BC9C" roughness={1} />
+        <meshStandardMaterial color={pal.threshold} roughness={1} />
       </mesh>
       {showFire && <Exits w={w} d={d} />}
     </group>
@@ -249,7 +327,7 @@ function EgressPaths({ w, d }: { w: number; d: number }) {
 
 function PlacedItemView({
   uid, id, x, z, rot, brand, selected, dragging,
-  onPointerDown,
+  onPointerDown, onOpenContext,
 }: {
   uid: string
   id: string
@@ -260,10 +338,17 @@ function PlacedItemView({
   selected: boolean
   dragging: boolean
   onPointerDown: (e: ThreeEvent<PointerEvent>, uid: string) => void
+  onOpenContext: (e: ThreeEvent<MouseEvent>, uid: string) => void
 }) {
   const groupRef = useRef<THREE.Group>(null)
+  const ringRef = useRef<THREE.Mesh>(null)
   useFrame((_, dt) => {
     if (groupRef.current) damp(groupRef.current.rotation, 'y', rot, 0.16, dt)
+    // selected ring gently breathes so the selection feels alive
+    if (ringRef.current && selected) {
+      const s = 1 + Math.sin(performance.now() * 0.004) * 0.025
+      ringRef.current.scale.setScalar(s)
+    }
   })
   const cat = getItem(id)
   const { hx, hz } = halfExtents(id, rot)
@@ -272,7 +357,7 @@ function PlacedItemView({
   return (
     <>
       {selected && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.014, z]}>
+        <mesh ref={ringRef} rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.014, z]}>
           <ringGeometry args={[ringR, ringR + 0.06, 44]} />
           <meshBasicMaterial color={brand} transparent opacity={0.85} />
         </mesh>
@@ -287,6 +372,13 @@ function PlacedItemView({
         ref={groupRef}
         position={[x, 0, z]}
         onPointerDown={(e) => onPointerDown(e, uid)}
+        onContextMenu={(e) => onOpenContext(e, uid)}
+        onPointerOver={() => {
+          document.body.style.cursor = 'grab'
+        }}
+        onPointerOut={() => {
+          document.body.style.cursor = ''
+        }}
       >
         <ItemModel id={id} brand={brand} />
       </group>
@@ -324,11 +416,17 @@ export default function Scene() {
   const moveItem = usePlanner((s) => s.moveItem)
   const select = usePlanner((s) => s.select)
   const arm = usePlanner((s) => s.arm)
+  const openContextMenu = usePlanner((s) => s.openContextMenu)
+  const { resolvedTheme } = useTheme()
+  const dark = resolvedTheme === 'dark'
+  const pal = dark ? NIGHT : DAY
 
   const controlsRef = useRef<any>(null)
   const animatingRef = useRef(true)
   const dragUid = useRef<string | null>(null)
   const downScreen = useRef<{ x: number; y: number } | null>(null)
+  /** where the right-button went down, so a right-drag pan doesn't open the menu */
+  const rightDown = useRef<{ x: number; y: number } | null>(null)
   const [ghost, setGhost] = useState<{ x: number; z: number } | null>(null)
   const [draggingUid, setDraggingUid] = useState<string | null>(null)
 
@@ -344,6 +442,10 @@ export default function Scene() {
   }, [])
 
   const onGroundDown = (e: ThreeEvent<PointerEvent>) => {
+    if (e.nativeEvent.button === 2) {
+      rightDown.current = { x: e.nativeEvent.clientX, y: e.nativeEvent.clientY }
+      return
+    }
     downScreen.current = { x: e.nativeEvent.clientX, y: e.nativeEvent.clientY }
   }
 
@@ -383,12 +485,23 @@ export default function Scene() {
 
   const onItemDown = (e: ThreeEvent<PointerEvent>, uid: string) => {
     if (armedId) return // let placement pass through
+    if (e.nativeEvent.button !== 0) return // right/middle click → context menu, not drag
     e.stopPropagation()
     select(uid)
     dragUid.current = uid
     setDraggingUid(uid)
     downScreen.current = null
     if (controlsRef.current) controlsRef.current.enabled = false
+  }
+
+  const onItemContext = (e: ThreeEvent<MouseEvent>, uid: string) => {
+    e.stopPropagation()
+    e.nativeEvent.preventDefault()
+    // ignore if this was the end of a right-drag pan
+    const rd = rightDown.current
+    rightDown.current = null
+    if (rd && Math.hypot(e.nativeEvent.clientX - rd.x, e.nativeEvent.clientY - rd.y) > 6) return
+    openContextMenu(uid, e.nativeEvent.clientX, e.nativeEvent.clientY)
   }
 
   return (
@@ -399,14 +512,14 @@ export default function Scene() {
       gl={{ antialias: true }}
       className="!absolute inset-0"
     >
-      <color attach="background" args={['#EDE7D9']} />
-      <fog attach="fog" args={['#EDE7D9', 34, 85]} />
+      <color attach="background" args={[pal.bg]} />
+      <fog attach="fog" args={[pal.fog, 34, 85]} />
 
-      <ambientLight intensity={0.55} />
-      <hemisphereLight args={['#FFFFFF', '#CBC2AC', 0.55]} />
+      <ambientLight intensity={pal.ambient} />
+      <hemisphereLight args={[pal.hemiSky, pal.hemiGround, pal.hemi]} />
       <directionalLight
         position={[9, 13, 7]}
-        intensity={1.25}
+        intensity={pal.sun}
         castShadow
         shadow-mapSize={[2048, 2048]}
         shadow-camera-left={-14}
@@ -419,7 +532,7 @@ export default function Scene() {
       />
 
       <Suspense fallback={null}>
-        <Room w={room.w} d={room.d} showFire={showFire} />
+        <Room w={room.w} d={room.d} showFire={showFire} pal={pal} />
         {showFire && <EgressPaths w={room.w} d={room.d} />}
 
         {/* interaction ground */}
@@ -432,7 +545,7 @@ export default function Scene() {
           onPointerUp={onGroundUp}
         >
           <planeGeometry args={[90, 90]} />
-          <meshStandardMaterial color={APRON_COLOR} roughness={1} />
+          <meshStandardMaterial color={pal.apron} roughness={1} />
         </mesh>
 
         {items.map((it) => (
@@ -443,6 +556,7 @@ export default function Scene() {
             selected={selectedUid === it.uid}
             dragging={draggingUid === it.uid}
             onPointerDown={onItemDown}
+            onOpenContext={onItemContext}
           />
         ))}
 

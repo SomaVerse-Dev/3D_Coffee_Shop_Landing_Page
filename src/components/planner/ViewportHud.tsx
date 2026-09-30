@@ -1,7 +1,10 @@
 'use client'
 
-import { ChevronDown, ChevronUp, Copy, RotateCw, Trash2, MousePointerClick } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { BadgeDollarSign, ChevronDown, ChevronUp, Copy, RotateCw, Trash2, MousePointerClick } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { usePlanner } from '@/lib/planner/store'
 import { getItem } from '@/lib/planner/catalog'
 import { fmtMoney } from '@/lib/planner/capacity'
@@ -13,7 +16,7 @@ export function HintChip() {
   const selectedUid = usePlanner((s) => s.selectedUid)
   let text = 'Pick furniture from the library, then click the floor to place it.'
   if (armedId) text = 'Click the floor to place · Esc to cancel'
-  else if (selectedUid) text = 'Drag to move · R rotate · Del remove · Esc deselect'
+  else if (selectedUid) text = 'Drag to move · R rotate · D duplicate · right-click for actions'
   return (
     <div className="chip-glass pointer-events-none flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[11px] font-medium text-stone-600">
       <MousePointerClick className="h-3.5 w-3.5 text-stone-400" />
@@ -28,20 +31,110 @@ export function SelectionControls() {
   const rotateItem = usePlanner((s) => s.rotateItem)
   const removeItem = usePlanner((s) => s.removeItem)
   const duplicateItem = usePlanner((s) => s.duplicateItem)
+  const setItemPrice = usePlanner((s) => s.setItemPrice)
   const item = items.find((i) => i.uid === selectedUid)
-  if (!item) return null
-  const cat = getItem(item.id)
+  const cat = item ? getItem(item.id) : null
+  const [priceOpen, setPriceOpen] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  // the item context menu can ask this panel to open the price editor
+  useEffect(() => {
+    const open = () => {
+      if (item) {
+        setDraft(String(item.price ?? cat?.price ?? ''))
+        setPriceOpen(true)
+      }
+    }
+    window.addEventListener('forma:edit-price', open)
+    return () => window.removeEventListener('forma:edit-price', open)
+  }, [item, cat])
+
+  if (!item || !cat) return null
+  const custom = item.price !== undefined && item.price !== cat.price
+
+  function commitPrice() {
+    const n = Number.parseFloat(draft)
+    if (Number.isNaN(n)) {
+      setDraft(String(item!.price ?? cat!.price))
+    } else {
+      setItemPrice(item!.uid, n)
+    }
+    setPriceOpen(false)
+  }
 
   return (
     <div className="card-glass pointer-events-auto flex items-center gap-1 rounded-xl p-1.5 pl-3.5">
       <div className="mr-1 text-xs">
-        <span className="font-semibold text-charcoal">{cat?.name}</span>
-        <span className="ml-1.5 tabular-nums text-stone-400">{cat ? fmtMoney(cat.price) : ''}</span>
+        <span className="font-semibold text-charcoal">{cat.name}</span>
+        <span className={cn('ml-1.5 tabular-nums', custom ? 'font-semibold text-amber-600' : 'text-stone-400')}>
+          {fmtMoney(item.price ?? cat.price)}
+        </span>
       </div>
+
+      {/* per-item price override */}
+      <Popover open={priceOpen} onOpenChange={(o) => {
+        if (o) setDraft(String(item.price ?? cat.price))
+        setPriceOpen(o)
+      }}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn('relative h-8 w-8', custom && 'text-amber-600')}
+            title="Edit unit price"
+            aria-label="Edit unit price"
+          >
+            <BadgeDollarSign className="h-4 w-4" />
+            {custom && <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="center" side="top" className="w-60 p-3.5">
+          <p className="font-display text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+            Unit price override
+          </p>
+          <p className="mt-1 text-[11px] leading-relaxed text-stone-500">
+            List price is {fmtMoney(cat.price)}. Override for trade quotes or discounts — totals update live.
+          </p>
+          <div className="mt-2.5 flex items-center gap-2">
+            <div className="relative flex-1">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-stone-400">$</span>
+              <Input
+                type="number"
+                min={0}
+                step={10}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitPrice()
+                  if (e.key === 'Escape') setPriceOpen(false)
+                }}
+                className="h-8 pl-6 text-xs tabular-nums"
+                aria-label="Unit price in dollars"
+              />
+            </div>
+            <Button size="sm" className="h-8 bg-charcoal px-2.5 text-xs text-warmwhite hover:bg-charcoal/90" onClick={commitPrice}>
+              Apply
+            </Button>
+          </div>
+          {custom && (
+            <button
+              type="button"
+              onClick={() => {
+                setItemPrice(item.uid, null)
+                setDraft(String(cat.price))
+              }}
+              className="mt-2 text-[11px] font-medium text-stone-500 underline-offset-2 hover:text-charcoal hover:underline"
+            >
+              Reset to list price ({fmtMoney(cat.price)})
+            </button>
+          )}
+        </PopoverContent>
+      </Popover>
+
       <Button variant="ghost" size="icon" className="h-8 w-8" title="Rotate 90° (R)" aria-label="Rotate 90 degrees" onClick={() => rotateItem(item.uid)}>
         <RotateCw className="h-4 w-4" />
       </Button>
-      <Button variant="ghost" size="icon" className="h-8 w-8" title="Duplicate" aria-label="Duplicate item" onClick={() => duplicateItem(item.uid)}>
+      <Button variant="ghost" size="icon" className="h-8 w-8" title="Duplicate (D)" aria-label="Duplicate item" onClick={() => duplicateItem(item.uid)}>
         <Copy className="h-4 w-4" />
       </Button>
       <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600 hover:bg-red-50 hover:text-red-700" title="Delete (Del)" aria-label="Delete item" onClick={() => removeItem(item.uid)}>

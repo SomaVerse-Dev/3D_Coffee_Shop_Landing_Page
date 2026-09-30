@@ -49,6 +49,10 @@ interface PlannerState {
   /** mirrors of the module-level history lengths so the UI can react */
   undoDepth: number
   redoDepth: number
+  /** floating context menu anchored to a placed item (viewport px coords) */
+  ctxMenu: { uid: string; x: number; y: number } | null
+  /** monotonically increasing counter — CameraRig reacts to changes */
+  zoomReq: { kind: 'in' | 'out' | 'fit'; n: number }
 
   setRoom: (w: number, d: number) => void
   addItem: (catalogId: string, x: number, z: number) => void
@@ -56,8 +60,13 @@ interface PlannerState {
   rotateItem: (uid: string) => void
   removeItem: (uid: string) => void
   duplicateItem: (uid: string) => void
+  /** override the catalog price for one placed item (null = back to list price) */
+  setItemPrice: (uid: string, price: number | null) => void
   select: (uid: string | null) => void
   arm: (catalogId: string | null) => void
+  openContextMenu: (uid: string, x: number, y: number) => void
+  closeContextMenu: () => void
+  requestZoom: (kind: 'in' | 'out' | 'fit') => void
   setViewMode: (m: ViewMode) => void
   toggleFire: () => void
   setCostOpen: (open: boolean) => void
@@ -125,6 +134,8 @@ export const usePlanner = create<PlannerState>()(
       templateId: 'cafe',
       undoDepth: 0,
       redoDepth: 0,
+      ctxMenu: null,
+      zoomReq: { kind: 'fit', n: 0 },
 
       setRoom: (w, d) => {
         pushHistory(get(), 'room')
@@ -184,6 +195,7 @@ export const usePlanner = create<PlannerState>()(
         set((s) => ({
           items: s.items.filter((i) => i.uid !== uid),
           selectedUid: s.selectedUid === uid ? null : s.selectedUid,
+          ctxMenu: s.ctxMenu?.uid === uid ? null : s.ctxMenu,
         }))
         syncDepth(set)
       },
@@ -204,12 +216,34 @@ export const usePlanner = create<PlannerState>()(
         syncDepth(set)
       },
 
-      select: (uid) => set({ selectedUid: uid, armedId: null }),
+      setItemPrice: (uid, price) => {
+        pushHistory(get(), 'price')
+        set((s) => ({
+          items: s.items.map((i) => {
+            if (i.uid !== uid) return i
+            const next = { ...i }
+            if (price === null) delete next.price
+            else next.price = Math.max(0, Math.round(price))
+            return next
+          }),
+          templateId: 'custom',
+        }))
+        syncDepth(set)
+      },
+
+      select: (uid) => set({ selectedUid: uid, armedId: null, ctxMenu: null }),
       arm: (catalogId) =>
         set((s) => ({
           armedId: catalogId,
           selectedUid: catalogId ? null : s.selectedUid,
+          ctxMenu: null,
         })),
+
+      openContextMenu: (uid, x, y) => set({ ctxMenu: { uid, x, y }, selectedUid: uid, armedId: null }),
+      closeContextMenu: () => set({ ctxMenu: null }),
+
+      requestZoom: (kind) =>
+        set((s) => ({ zoomReq: { kind, n: s.zoomReq.n + 1 } })),
 
       setViewMode: (m) => set({ viewMode: m }),
       toggleFire: () => set((s) => ({ showFire: !s.showFire })),
@@ -234,6 +268,7 @@ export const usePlanner = create<PlannerState>()(
             templateId: id,
             selectedUid: null,
             armedId: null,
+            ctxMenu: null,
           }
         })
         syncDepth(set)
@@ -241,7 +276,7 @@ export const usePlanner = create<PlannerState>()(
 
       clearAll: () => {
         pushHistory(get(), 'clear')
-        set({ items: [], selectedUid: null, armedId: null, templateId: 'custom' })
+        set({ items: [], selectedUid: null, armedId: null, ctxMenu: null, templateId: 'custom' })
         syncDepth(set)
       },
 
@@ -255,6 +290,7 @@ export const usePlanner = create<PlannerState>()(
           templateId: snap.templateId,
           selectedUid: null,
           armedId: null,
+          ctxMenu: null,
         }))
         syncDepth(set)
       },
@@ -274,6 +310,7 @@ export const usePlanner = create<PlannerState>()(
           templateId: prev.templateId,
           selectedUid: null,
           armedId: null,
+          ctxMenu: null,
         }))
         syncDepth(set)
       },
@@ -291,6 +328,7 @@ export const usePlanner = create<PlannerState>()(
           templateId: next.templateId,
           selectedUid: null,
           armedId: null,
+          ctxMenu: null,
         }))
         syncDepth(set)
       },

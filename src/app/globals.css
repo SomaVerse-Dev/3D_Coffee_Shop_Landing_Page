@@ -9,9 +9,10 @@
   --font-sans: var(--font-inter);
   --font-display: var(--font-space);
   --font-mono: var(--font-geist-mono);
-  --color-charcoal: #2B2925;
-  --color-oat: #E8E0CE;
-  --color-warmwhite: #FAF7F0;
+  /* palette vars swap under .dark — see :root / .dark below */
+  --color-charcoal: var(--charcoal);
+  --color-oat: var(--oat);
+  --color-warmwhite: var(--warmwhite);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -49,6 +50,10 @@
 
 :root {
   --radius: 0.625rem;
+  /* FORMA palette — light (day studio) */
+  --charcoal: #2B2925;
+  --oat: #E8E0CE;
+  --warmwhite: #FAF7F0;
   --background: #FAF7F0;
   --foreground: #2B2925;
   --card: #FFFDF8;
@@ -82,38 +87,63 @@
   --sidebar-ring: #B9AE97;
 }
 
+/* ── Night studio: warm charcoal/espresso dark theme ─────────────────────
+   Tailwind v4 emits color utilities as runtime CSS vars, so overriding the
+   default stone/white scales + the FORMA palette vars re-themes every
+   hand-rolled surface without touching component classes. Pair-contrast
+   usages (bg-charcoal text-warmwhite) invert gracefully. */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* FORMA palette — dark (night studio) */
+  --charcoal: #ECE5D7;      /* ink → warm off-white */
+  --oat: #2E2921;           /* oat section band → deep espresso */
+  --warmwhite: #17140F;     /* page canvas → near-black coffee */
+
+  --background: #17140F;
+  --foreground: #ECE5D7;
+  --card: #201C16;
+  --card-foreground: #ECE5D7;
+  --popover: #241F19;
+  --popover-foreground: #ECE5D7;
+  --primary: #ECE5D7;
+  --primary-foreground: #1C1914;
+  --secondary: #2C271F;
+  --secondary-foreground: #ECE5D7;
+  --muted: #2A251E;
+  --muted-foreground: #A99F8D;
+  --accent: #2E2921;
+  --accent-foreground: #ECE5D7;
+  --destructive: #E5484D;
+  --border: rgba(236, 229, 215, 0.12);
+  --input: rgba(236, 229, 215, 0.16);
+  --ring: #8A7F6C;
+  --chart-1: #D97B4A;
+  --chart-2: #4C9A72;
+  --chart-3: #D1A94F;
+  --chart-4: #C05E7E;
+  --chart-5: #97A06E;
+  --sidebar: #1D1914;
+  --sidebar-foreground: #ECE5D7;
+  --sidebar-primary: #ECE5D7;
+  --sidebar-primary-foreground: #1C1914;
+  --sidebar-accent: #2C271F;
+  --sidebar-accent-foreground: #ECE5D7;
+  --sidebar-border: rgba(236, 229, 215, 0.12);
+  --sidebar-ring: #8A7F6C;
+
+  /* default tailwind scales — warm dark remap so `bg-white`, `stone-*`
+     utilities across the workspace flip without class changes */
+  --color-white: #262119;
+  --color-stone-50: #221E18;
+  --color-stone-100: #2A251E;
+  --color-stone-200: #38322A;
+  --color-stone-300: #463F35;
+  --color-stone-400: #958B79;
+  --color-stone-500: #ACA292;
+  --color-stone-600: #C7BDAC;
+  --color-stone-700: #DDD4C5;
+  --color-stone-800: #E9E1D3;
+  --color-stone-900: #F2ECDF;
+  --color-stone-950: #F7F2E8;
 }
 
 @layer base {
@@ -127,6 +157,10 @@
   ::selection {
     background-color: #E8E0CE;
     color: #2B2925;
+  }
+  .dark ::selection {
+    background-color: #4A4234;
+    color: #F2ECDF;
   }
   /* smooth anchor scrolling, unless the user prefers reduced motion */
   @media (prefers-reduced-motion: no-preference) {
@@ -144,6 +178,13 @@
       0 0 0 4.5px rgba(43, 41, 37, 0.55);
     border-radius: inherit;
   }
+  .dark button:focus-visible,
+  .dark a:focus-visible,
+  .dark [role='button']:focus-visible {
+    box-shadow:
+      0 0 0 2px #17140F,
+      0 0 0 4.5px rgba(236, 229, 215, 0.55);
+  }
 }
 
 /* ── FORMA planner styles ─────────────────────────────────────────── */
@@ -160,6 +201,16 @@
     22px 22px,
     110px 110px,
     110px 110px;
+}
+
+/* night studio viewport: espresso drafting table */
+.dark .blueprint-grid {
+  background-color: #1C1813;
+  background-image:
+    linear-gradient(to right, rgba(236, 229, 215, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(236, 229, 215, 0.05) 1px, transparent 1px),
+    linear-gradient(to right, rgba(236, 229, 215, 0.10) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(236, 229, 215, 0.10) 1px, transparent 1px);
 }
 
 .thin-scroll {
@@ -180,6 +231,15 @@
 .thin-scroll::-webkit-scrollbar-thumb:hover {
   background: #C2B69C;
 }
+.dark .thin-scroll {
+  scrollbar-color: #4A4234 transparent;
+}
+.dark .thin-scroll::-webkit-scrollbar-thumb {
+  background: #4A4234;
+}
+.dark .thin-scroll::-webkit-scrollbar-thumb:hover {
+  background: #5C5342;
+}
 
 /* faded blueprint band for hero / decorative strips */
 .blueprint-band {
@@ -196,6 +256,13 @@
   -webkit-mask-image: linear-gradient(to bottom, transparent, black 35%, black 65%, transparent);
   mask-image: linear-gradient(to bottom, transparent, black 35%, black 65%, transparent);
 }
+.dark .blueprint-band {
+  background-image:
+    linear-gradient(to right, rgba(236, 229, 215, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(236, 229, 215, 0.07) 1px, transparent 1px),
+    linear-gradient(to right, rgba(236, 229, 215, 0.13) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(236, 229, 215, 0.13) 1px, transparent 1px);
+}
 
 /* consistent glass treatment for HUD panels floating over the 3D viewport */
 .card-glass {
@@ -209,6 +276,16 @@
     0 2px 8px -2px rgba(46, 43, 38, 0.12);
 }
 
+/* night glass: smoked espresso panels */
+.dark .card-glass {
+  background: rgba(32, 28, 22, 0.88);
+  border-color: rgba(236, 229, 215, 0.14);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 16px 40px -16px rgba(0, 0, 0, 0.65),
+    0 2px 8px -2px rgba(0, 0, 0, 0.4);
+}
+
 /* lighter pill variant for the hint chip */
 .chip-glass {
   background: rgba(255, 253, 248, 0.86);
@@ -218,6 +295,14 @@
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.8) inset,
     0 8px 20px -10px rgba(46, 43, 38, 0.28);
+}
+
+.dark .chip-glass {
+  background: rgba(32, 28, 22, 0.85);
+  border-color: rgba(236, 229, 215, 0.13);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 8px 20px -10px rgba(0, 0, 0, 0.5);
 }
 
 /* bottom safe-area padding for the sticky footer */
@@ -240,4 +325,42 @@ input[type='color']::-webkit-color-swatch-wrapper {
 input[type='color']::-webkit-color-swatch {
   border: 1px solid #E2DACA;
   border-radius: 0.375rem;
+}
+.dark input[type='color']::-webkit-color-swatch {
+  border-color: rgba(236, 229, 215, 0.2);
+}
+
+/* ── Floating item context menu (right-click on placed furniture) ── */
+.ctx-glass {
+  background: rgba(255, 253, 248, 0.94);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  backdrop-filter: blur(14px) saturate(1.2);
+  border: 1px solid rgba(226, 218, 202, 0.95);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 24px 48px -12px rgba(46, 43, 38, 0.4),
+    0 4px 12px -4px rgba(46, 43, 38, 0.18);
+}
+.dark .ctx-glass {
+  background: rgba(36, 31, 25, 0.94);
+  border-color: rgba(236, 229, 215, 0.16);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.07) inset,
+    0 24px 48px -12px rgba(0, 0, 0, 0.7),
+    0 4px 12px -4px rgba(0, 0, 0, 0.45);
+}
+
+@keyframes ctx-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.ctx-pop {
+  animation: ctx-pop 0.14s cubic-bezier(0.2, 0.9, 0.3, 1.4) both;
+  transform-origin: top left;
 }

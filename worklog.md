@@ -120,3 +120,30 @@ Stage Summary:
 - Files: prisma/schema.prisma; src/app/api/layouts/{route.ts,[id]/route.ts}; src/lib/planner/{store.ts,share.ts,thumbnail.ts}; src/components/planner/{Toolbar.tsx,LayoutsMenu.tsx,PlannerWorkspace.tsx}.
 - Lint 0 errors; dev.log clean; desktop 1440 + mobile 390 QA passed; leftover test row deleted (DB back to empty).
 - Next-round ideas (priority): light/dark theme toggle; item context menu (right-click rotate/duplicate/delete); layout diff history panel; per-item price override; multi-room/zone support; SoundCloud-style public gallery of shared layouts (server-rendered page with OG image).
+
+---
+Task ID: 6
+Agent: Z.ai Code (cron webDevReview)
+Task: Round 2 — QA sweep + Night-Studio dark theme + item context menu + camera zoom controls + per-item price override
+
+Work Log:
+- Status assessment: v1.1 stable before this round (lint 0 errors, GET / 200, console clean, agent-browser desktop 1440 + mobile 390 sweep found no bugs; templates/capacity/brand sections + footer verified). Phase = stable → new-feature round per mandate.
+- Night-Studio dark mode (next-themes, already installed):
+  - globals.css: converted FORMA palette tokens (charcoal/oat/warmwhite) from literal @theme values to var() indirection so `.dark` overrides them at runtime; added a full `.dark` block — warm espresso shadcn tokens (background #17140F, card #201C16, popover #241F19…) AND warm remaps of the default tailwind scales (--color-white → #262119, stone-50…950 flipped to warm darks) so every hand-rolled `bg-white`/`text-stone-*` utility re-themes with zero component changes; dark variants for .blueprint-grid, .blueprint-band, .thin-scroll, .card-glass, .chip-glass, ::selection, focus-visible ring, input[type=color] swatch.
+  - Scene.tsx: 3D viewport re-lights itself — DAY/NIGHT palettes (bg/fog/floor/apron/walls/grid/windows/threshold + ambient/hemi/sun intensities); Room/WallSegment take a `pal` prop; night scene is moody espresso with brand-colored furniture popping.
+  - ThemeProvider (next-themes, attribute=class, defaultTheme=light, disableTransitionOnChange) in layout.tsx; ThemeToggle (sun/moon cross-fade + rotate) in the sticky header; useSyncExternalStore mounted flag (lint-safe).
+  - Theme-proof fixes: footer rebuilt with literal always-dark ink colors (#211D17 band + warm gray text) so it stays a dark footer in both themes; template-card photo overlay gradient switched from from-charcoal/45 to literal #1F1B15 so photos keep a dark scrim in dark mode. Pair-contrast usages (bg-charcoal text-warmwhite CTAs) invert gracefully.
+- Right-click context menu (ItemContextMenu.tsx):
+  - R3F onContextMenu on each item group; rightDown ref guards against right-drag pan (6px threshold); onItemDown now ignores non-primary buttons; store state ctxMenu {uid,x,y} + openContextMenu/closeContextMenu; menu closes on Esc/wheel/outside pointerdown/any action; edge-clamped fixed positioning; ctx-glass + ctx-pop keyframe styles; menu shows item name + brand-colored price, custom-price badge, Rotate 90° (R), Duplicate (D), Edit price (jumps to selection popover via forma:edit-price event), destructive Remove (Del); selecting via menu syncs SelectionControls.
+- Camera zoom controls (ViewControls.tsx):
+  - Glass cluster on viewport left edge: Zoom in / Zoom out / Re-frame room with tooltips + shortcut hints; store zoomReq {kind,n} counter; CameraRig watches it — in/out dolly along the view vector eased via damp3 (clamped to OrbitControls min/max), fit replays the plan/3D home-position swing; keyboard: +/-/= zoom, F re-frame; also added D = duplicate shortcut in PlannerWorkspace.
+- Per-item price override:
+  - types.ts PlacedItem.price?: number; store setItemPrice(uid, price|null) with history push; computeCost groups custom-priced units into separate lines (key id::unit) and flags them custom; CostPanel renders amber CUSTOM chips + "custom unit prices applied" note; SelectionControls gained a price popover (BadgeDollarSign trigger, $ input, Apply, reset-to-list) with custom-price dot indicator; flows through undo/redo, share links, saved layouts and PDF export (all consume computeCost/snapshot as-is).
+  - store: ctxMenu cleared on all destructive/global actions (remove/loadTemplate/clearAll/applySnapshot/undo/redo/arm/select).
+- Styling details: breathing selection ring (scale osc in useFrame), grab cursor on item hover, hint chip copy updated (D duplicate · right-click for actions), hero tip kbd row now shows R/D/Del/F + right-click, dev-only window.__forma QA handle (NODE_ENV-guarded) for browser automation.
+- E2E verified via agent-browser: dark toggle (all sections + footer + 3D scene re-light screenshots at 1440), light restore, context menu open/duplicate (32→33)/edit price ($280→$200 custom), cost math ($20.5k + dup $280 − $80 discount = $20.7k ✓), CostPanel CUSTOM line + note, zoom in ×2 + re-frame fit, D shortcut + Ctrl+Z, plan/3D swing regression, mobile 390 (0px overflow, ViewControls + theme toggle fit), Corner Café template restored afterwards. Lint 0 errors; dev.log clean (only benign THREE warnings + transient Fast-Refresh reloads during edits).
+
+Stage Summary:
+- v1.2: Night-Studio dark theme (UI + 3D scene), right-click item actions, camera zoom/re-frame with keyboard shortcuts, per-item price overrides with live cost integration.
+- Files: src/app/{globals.css,layout.tsx,page.tsx}; src/components/{theme-provider.tsx,theme-toggle.tsx}; src/components/planner/{Scene.tsx,PlannerWorkspace.tsx,ItemContextMenu.tsx,ViewControls.tsx,ViewportHud.tsx,CostPanel.tsx,sections.tsx}; src/lib/planner/{store.ts,types.ts,capacity.ts}.
+- Next-round ideas (priority): public gallery of shared layouts (server-rendered + OG image), multi-room/zones, layout diff history panel, per-category budget caps, drag-from-catalog ghost improvements, a11y pass on 3D canvas (focusable viewport with roving instructions).

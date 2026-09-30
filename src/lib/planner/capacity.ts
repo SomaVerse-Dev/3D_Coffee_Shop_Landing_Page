@@ -87,14 +87,19 @@ const INSTALL_RATE = 0.12
 const CONTINGENCY_RATE = 0.08
 
 export function computeCost(items: PlacedItem[]): CostReport {
-  const map = new Map<string, CostLine>()
+  const map = new Map<string, CostLine & { custom?: boolean }>()
   for (const it of items) {
     const cat = getItem(it.id)
     if (!cat) continue
-    const line = map.get(it.id) ?? { id: it.id, name: cat.name, qty: 0, unit: cat.price, total: 0 }
+    const custom = it.price !== undefined && it.price !== cat.price
+    const unit = it.price ?? cat.price
+    // group by id + unit price so catalog-price and custom-price units stay separate lines
+    const key = custom ? `${it.id}::${unit}` : it.id
+    const line =
+      map.get(key) ?? { id: key, name: cat.name, qty: 0, unit, total: 0, custom }
     line.qty += 1
     line.total = line.qty * line.unit
-    map.set(it.id, line)
+    map.set(key, line)
   }
   const lines = [...map.values()].sort((a, b) => b.total - a.total)
   const subtotal = lines.reduce((s, l) => s + l.total, 0)

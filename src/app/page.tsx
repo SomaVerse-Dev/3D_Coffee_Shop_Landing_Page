@@ -1,6 +1,7 @@
 import { ArrowDown, Compass, DraftingCompass, Flame, Users } from 'lucide-react'
 import PlannerWorkspace from '@/components/planner/PlannerWorkspace'
 import { BrandStrip, CapacityGuide, TemplateGallery } from '@/components/planner/sections'
+import { ThemeToggle } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
 
 export default function Home() {
@@ -34,12 +35,15 @@ export default function Home() {
               </a>
             ))}
           </nav>
-          <Button
-            asChild
-            className="h-8 bg-charcoal px-3 text-xs font-semibold text-warmwhite shadow-xs transition-all hover:bg-charcoal/90 hover:shadow-md"
-          >
-            <a href="#planner">Open the studio</a>
-          </Button>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <Button
+              asChild
+              className="h-8 bg-charcoal px-3 text-xs font-semibold text-warmwhite shadow-xs transition-all hover:bg-charcoal/90 hover:shadow-md"
+            >
+              <a href="#planner">Open the studio</a>
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -91,9 +95,11 @@ export default function Home() {
           </div>
 
           <p className="mx-auto mt-4 max-w-2xl text-center text-[11px] leading-relaxed text-stone-400">
-            Tip: drag furniture to move it · press <kbd className="rounded border border-stone-300 bg-white px-1 font-mono text-[10px] shadow-xs">R</kbd> to rotate ·
-            <kbd className="ml-1 rounded border border-stone-300 bg-white px-1 font-mono text-[10px] shadow-xs">Del</kbd> to remove ·
-            switch Plan / 3D for the camera swing.
+            Tip: drag furniture to move it · <kbd className="rounded border border-stone-300 bg-white px-1 font-mono text-[10px] shadow-xs">R</kbd> rotate ·
+            <kbd className="ml-1 rounded border border-stone-300 bg-white px-1 font-mono text-[10px] shadow-xs">D</kbd> duplicate ·
+            <kbd className="ml-1 rounded border border-stone-300 bg-white px-1 font-mono text-[10px] shadow-xs">Del</kbd> remove ·
+            <kbd className="ml-1 rounded border border-stone-300 bg-white px-1 font-mono text-[10px] shadow-xs">F</kbd> re-frame ·
+            right-click any piece for quick actions.
           </p>
         </section>
 
@@ -102,25 +108,25 @@ export default function Home() {
         <BrandStrip />
       </main>
 
-      {/* ── sticky footer ──────────────────────────────────────── */}
-      <footer className="mt-auto bg-charcoal text-stone-300">
+      {/* ── sticky footer (always-dark ink band in both themes) ──────────────────────────────────────── */}
+<footer className="mt-auto bg-[#211D17] text-[#B9AF9E]">
         {/* subtle top highlight hairline */}
-        <div aria-hidden className="h-px w-full bg-gradient-to-r from-transparent via-warmwhite/25 to-transparent" />
+        <div aria-hidden className="h-px w-full bg-gradient-to-r from-transparent via-[#FAF7F0]/25 to-transparent" />
         <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 pb-12 pt-12 sm:grid-cols-2 sm:px-6 lg:grid-cols-[1.5fr_1fr_1.3fr]">
           <div>
             <div className="flex items-center gap-2.5">
-              <span className="flex h-7 w-7 items-center justify-center rounded-md bg-warmwhite text-charcoal shadow-xs">
+              <span className="flex h-7 w-7 items-center justify-center rounded-md bg-[#FAF7F0] text-[#211D17] shadow-xs">
                 <DraftingCompass className="h-4 w-4" />
               </span>
-              <span className="font-display text-base font-bold tracking-tight text-warmwhite">FORMA</span>
+              <span className="font-display text-base font-bold tracking-tight text-[#F3EDE1]">FORMA</span>
             </div>
-            <p className="mt-4 max-w-xs text-xs leading-relaxed text-stone-400">
+            <p className="mt-4 max-w-xs text-xs leading-relaxed text-[#8F8676]">
               A practical space planner for small commercial interiors — plan, price and prove a layout before signing a lease.
             </p>
           </div>
           <nav aria-label="Footer" className="text-xs">
-            <p className="font-display text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">Studio</p>
-            <span aria-hidden className="mt-2.5 block h-px w-8 bg-stone-700" />
+            <p className="font-display text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6E6656]">Studio</p>
+            <span aria-hidden className="mt-2.5 block h-px w-8 bg-[#3B352B]" />
             <ul className="mt-4 space-y-2.5">
               {[
                 ['#planner', 'Workspace'],
@@ -131,9 +137,9 @@ export default function Home() {
                 <li key={href}>
                   <a
                     href={href}
-                    className="group inline-flex items-center gap-1.5 text-stone-400 transition-all duration-150 hover:translate-x-0.5 hover:text-warmwhite"
+                    className="group inline-flex items-center gap-1.5 text-[#9A9080] transition-all duration-150 hover:translate-x-0.5 hover:text-[#F3EDE1]"
                   >
-                    <span aria-hidden className="h-px w-0 bg-stone-500 transition-all duration-200 group-hover:w-2.5" />
+                    <span aria-hidden className="h-px w-0 bg-[#6E6656] transition-all duration-200 group-hover:w-2.5" />
                     {label}
                   </a>
                 </li>
@@ -141,16 +147,16 @@ export default function Home() {
             </ul>
           </nav>
           <div className="text-xs">
-            <p className="font-display text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">Good to know</p>
-            <span aria-hidden className="mt-2.5 block h-px w-8 bg-stone-700" />
-            <p className="mt-4 max-w-sm leading-relaxed text-stone-400">
+            <p className="font-display text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6E6656]">Good to know</p>
+            <span aria-hidden className="mt-2.5 block h-px w-8 bg-[#3B352B]" />
+            <p className="mt-4 max-w-sm leading-relaxed text-[#9A9080]">
               Capacity, egress and cost figures are rules of thumb for early planning.
               Always verify occupancy and fire safety with your local code official before opening day.
             </p>
           </div>
         </div>
         <div className="border-t border-white/10">
-          <div className="mx-auto flex w-full max-w-7xl flex-col gap-1.5 px-4 pt-5 pb-safe text-[11px] text-stone-500 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <div className="mx-auto flex w-full max-w-7xl flex-col gap-1.5 px-4 pt-5 pb-safe text-[11px] text-[#7A7263] sm:flex-row sm:items-center sm:justify-between sm:px-6">
             <p>© 2025 FORMA Studio. Documentary-style photography generated for this demo.</p>
             <p className="inline-flex items-center gap-1.5">
               <DraftingCompass className="h-3 w-3" aria-hidden />

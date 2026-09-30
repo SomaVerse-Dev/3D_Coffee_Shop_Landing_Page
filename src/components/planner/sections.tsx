@@ -71,7 +71,7 @@ export function TemplateGallery() {
                 )}
                 <div
                   aria-hidden
-                  className="pointer-events-none absolute inset-0 bg-gradient-to-t from-charcoal/45 via-charcoal/5 to-transparent opacity-70 transition-opacity duration-500 group-hover:opacity-100"
+                  className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#1F1B15]/60 via-[#1F1B15]/8 to-transparent opacity-80 transition-opacity duration-500 group-hover:opacity-100"
                 />
                 <span
                   className="absolute left-3 top-3 h-6 w-6 rounded-md border-2 border-white/70 shadow-md"
