@@ -66,8 +66,16 @@ bun run lint
 
 ## License
 
-This project is proprietary and all rights are reserved. See [LICENSE](./LICENSE) for details.
+This project is open-source software licensed under the
+[GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
+
+AGPL-3.0 is a strong copyleft license: if you run a modified version of
+this software on a server and users interact with it over a network, you
+must make the Corresponding Source available to those users at no charge.
+This keeps the software free and open for everyone.
+
+See [LICENSE](./LICENSE) for the full license text.
 
 ---
 
-© SomaVerse-Dev. All rights reserved.
+© 2026 SomaVerse-Dev. Licensed under GNU AGPL v3.0.
